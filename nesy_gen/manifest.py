@@ -5,7 +5,7 @@ from typing import List, Dict, Any, Optional
 REQUIRED_FIELDS = {"study_id", "image_path", "report", "indication", "split"}
 
 def load_manifest(manifest_path: Path) -> List[Dict[str, Any]]:
-    """Loads a JSONL manifest file."""
+    """Loads a JSONL manifest file and normalizes splits."""
     examples = []
     with open(manifest_path, "r", encoding="utf-8") as f:
         for line in f:
@@ -17,7 +17,46 @@ def load_manifest(manifest_path: Path) -> List[Dict[str, Any]]:
                         item[fld] = ""  # Default empty if missing
                 if "metadata" not in item:
                     item["metadata"] = {}
+                
+                # Normalize split names
+                split_val = str(item.get("split", "train")).lower().strip()
+                if split_val in ("validation", "val", "valid"):
+                    item["split"] = "val"
+                elif split_val in ("testing", "test"):
+                    item["split"] = "test"
+                else:
+                    item["split"] = "train"
+                    
                 examples.append(item)
+                
+    # If validation or test splits are empty, partition the training split dynamically
+    train_indices = [i for i, item in enumerate(examples) if item.get("split") == "train"]
+    val_indices = [i for i, item in enumerate(examples) if item.get("split") == "val"]
+    test_indices = [i for i, item in enumerate(examples) if item.get("split") == "test"]
+    
+    # Allocate 10% of train to val if missing
+    if not val_indices and len(train_indices) > 5:
+        import random
+        rng = random.Random(42)
+        # Shuffle a copy to preserve original order in indices mapping
+        shuffled_train = list(train_indices)
+        rng.shuffle(shuffled_train)
+        val_size = max(1, int(len(shuffled_train) * 0.1))
+        for idx in shuffled_train[:val_size]:
+            examples[idx]["split"] = "val"
+            
+    # Re-fetch train indices after allocating validation
+    train_indices = [i for i, item in enumerate(examples) if item.get("split") == "train"]
+    # Allocate 10% of train to test if missing
+    if not test_indices and len(train_indices) > 5:
+        import random
+        rng = random.Random(42)
+        shuffled_train = list(train_indices)
+        rng.shuffle(shuffled_train)
+        test_size = max(1, int(len(shuffled_train) * 0.1))
+        for idx in shuffled_train[:test_size]:
+            examples[idx]["split"] = "test"
+            
     return examples
 
 def save_manifest(examples: List[Dict[str, Any]], manifest_path: Path) -> None:
