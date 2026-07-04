@@ -1,0 +1,23 @@
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ruff_cache/
+
+# Outputs, checkpoints, and heavy data caches
+output/
+*.csv
+*.json
+*.log
+*.html
+
+# OS files
+.DS_Store
+.ipynb_checkpoints/
+
+# Virtual environments
+.venv/
+env/
+venv/
