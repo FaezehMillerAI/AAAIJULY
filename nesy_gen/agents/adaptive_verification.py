@@ -194,6 +194,9 @@ def run_adaptive_verification_pipeline(
     all_traces = []
     all_claims = []
     
+    import time
+    start_time = time.time()
+    
     for item in tqdm(raw_predictions, desc="Verifying Claims"):
         sid = item["study_id"]
         draft = item["prediction"]
@@ -228,6 +231,13 @@ def run_adaptive_verification_pipeline(
                 "support_score": tr["support_score"],
                 "decision": tr["decision"]
             })
+            
+    end_time = time.time()
+    total_time = end_time - start_time
+    avg_latency_ms = (total_time / max(1, len(raw_predictions))) * 1000.0
+    print(f"\n[Verifier Time Audit] Policy: {policy}")
+    print(f"Total verification time for {len(raw_predictions)} reports: {total_time:.3f} seconds")
+    print(f"Average latency per report: {avg_latency_ms:.2f} ms")
             
     # Save CSV predictions
     pred_df = pd.DataFrame(results)
