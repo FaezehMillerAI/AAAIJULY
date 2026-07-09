@@ -56,7 +56,7 @@ class AdaptiveClaimVerifier:
         # Defensive fallback: if draft is empty, too short (under 10 words), contains no clinical entities,
         # or has extremely low alignment with retrieval candidates (indicates generator collapse/looping)
         clean_words = [w for w in re.findall(r'\w+', draft_report) if not w.isdigit()]
-        if len(clean_words) < 10 or len(linked_draft) == 0 or max_support < 0.25:
+        if len(clean_words) < 10 or len(linked_draft) == 0 or max_support < 0.35:
             if retrieved_candidates:
                 best_cand_text = retrieved_candidates[0]["report"]
                 best_score = -1.0
@@ -67,8 +67,8 @@ class AdaptiveClaimVerifier:
                     linked = self.kg_cache.link_entities(report_text)
                     ltn_score = evaluate_ltn_constraints(linked, self.kg_cache)["overall_score"]
                     
-                    # Combined score with alpha=0.5
-                    comb_score = 0.5 * ret_score + 0.5 * ltn_score
+                    # Combined score with alpha=0.75 (prioritizes high lexical quality while checking logic)
+                    comb_score = 0.75 * ret_score + 0.25 * ltn_score
                     if comb_score > best_score:
                         best_score = comb_score
                         best_cand_text = report_text

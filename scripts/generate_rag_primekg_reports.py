@@ -16,7 +16,7 @@ def parse_args():
     parser.add_argument("--retrieval-cache", type=str, default="output/rag_candidate_cache.json")
     parser.add_argument("--primekg-cache", type=str, default="output/primekg_radiology_cache")
     parser.add_argument("--output-csv", type=str, default="output/rag_primekg_gate.csv")
-    parser.add_argument("--alpha", type=float, default=0.5, help="Retrieval score vs LTN weight")
+    parser.add_argument("--alpha", type=float, default=0.75, help="Retrieval score vs LTN weight")
     return parser.parse_args()
 
 def main():
