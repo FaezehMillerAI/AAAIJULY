@@ -100,15 +100,31 @@ def main():
         "source": [
             "# Global parameters\n",
             "RUN_SIZE = 'full' # 'smoke' or 'full'\n",
+            "DATASET = 'indiana' # 'indiana' or 'mimic'\n",
+            "\n",
+            "# Automatically search for the dataset input path\n",
+            "import os\n",
+            "_DIRS = {\n",
+            "    'indiana': [\n",
+            "        '/kaggle/input/chest-xrays-indiana-university',\n",
+            "        '/kaggle/input/datasets/raddar/chest-xrays-indiana-university',\n",
+            "        '/kaggle/input/datasets/rezakurniawan27/iu-xray/iu_xray'\n",
+            "    ],\n",
+            "    'mimic': [\n",
+            "        '/kaggle/input/datasets/simhadrisadaram/mimic-cxr-dataset',\n",
+            "        '/kaggle/input/mimic-cxr-dataset'\n",
+            "    ]\n",
+            "}\n",
+            "DATA_DIR = next((p for p in _DIRS[DATASET] if os.path.isdir(p)), _DIRS[DATASET][0])\n",
             "\n",
             "# Model Selection Choices:\n",
             "# TEXT_MODEL_NAME: 'google/flan-t5-small', 'google/flan-t5-base', 't5-small', 't5-base', 'razent/SciFive-base-PMC'\n",
             "# VISUAL_BACKBONE: 'densenet121', 'resnet50', 'efficientnet_b0', 'efficientnet_b4'\n",
             "if RUN_SIZE == 'full':\n",
-            "    TEXT_MODEL_NAME = 'google/flan-t5-base'\n",
+            "    TEXT_MODEL_NAME = 'razent/SciFive-base-PMC'\n",
             "    VISUAL_BACKBONE = 'efficientnet_b4'\n",
             "    VISION_T5_BATCH_SIZE = 4\n",
-            "    VISION_T5_EPOCHS = 3\n",
+            "    VISION_T5_EPOCHS = 10\n",
             "else:\n",
             "    TEXT_MODEL_NAME = 't5-small'\n",
             "    VISUAL_BACKBONE = 'densenet121'\n",
@@ -118,7 +134,8 @@ def main():
             "FREEZE_VISUAL_ENCODER = True # Set to True to freeze visual encoder, False to fine-tune it\n",
             "MAX_NEW_TOKENS = 96 # Maximum generated report length\n",
             "RETRIEVAL_TOP_K = 10 # Retrieval candidates count\n",
-            "print(f'Configuration initialized. Run size: {RUN_SIZE}')\n",
+            "print(f'Configuration initialized. Run size: {RUN_SIZE}, Dataset: {DATASET}')\n",
+            "print(f'Data Directory: {DATA_DIR}')\n",
             "print(f'Using Model: Decoder={TEXT_MODEL_NAME}, Visual Backbone={VISUAL_BACKBONE}')\n",
             "print(f'Freeze Visual Encoder Backbone: {FREEZE_VISUAL_ENCODER}')"
         ]
@@ -216,7 +233,7 @@ def main():
         "outputs": [],
         "source": [
             "# 1. Build common manifest\n",
-            "!python scripts/build_manifest.py --iu-xray-root /kaggle/input/datasets/rezakurniawan27/iu-xray/iu_xray --output-dir output { '--mock' if RUN_SIZE == 'smoke' else '' }"
+            "!python scripts/build_manifest.py --dataset {DATASET} --data-dir {DATA_DIR} --output-dir output { '--mock' if RUN_SIZE == 'smoke' else '' }"
         ]
     })
     

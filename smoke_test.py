@@ -21,7 +21,7 @@ def main():
     run_cmd([
         sys.executable,
         str(root_dir / "scripts" / "build_manifest.py"),
-        "--iu-xray-root", "nonexistent_dir",
+        "--data-dir", "nonexistent_dir",
         "--output-dir", str(out_dir),
         "--mock"
     ])
