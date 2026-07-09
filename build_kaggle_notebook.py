@@ -38,6 +38,7 @@ def main():
         ("scripts/generate_rag_primekg_reports.py", "scripts/generate_rag_primekg_reports.py"),
         ("scripts/train_vision_t5_generator.py", "scripts/train_vision_t5_generator.py"),
         ("scripts/generate_vision_t5_reports.py", "scripts/generate_vision_t5_reports.py"),
+        ("scripts/generate_vlm_reports.py", "scripts/generate_vlm_reports.py"),
         ("scripts/run_adaptive_verification.py", "scripts/run_adaptive_verification.py"),
         ("scripts/evaluate_generation.py", "scripts/evaluate_generation.py"),
     ]
@@ -101,6 +102,7 @@ def main():
             "# Global parameters\n",
             "RUN_SIZE = 'full' # 'smoke' or 'full'\n",
             "DATASET = 'indiana' # 'indiana' or 'mimic'\n",
+            "VLM_ENGINE = 'pretrained' # 'custom' (train T5 VLM) or 'pretrained' (zero-shot MedGemma/Gemma3)\n",
             "\n",
             "# Automatically search for the dataset input path\n",
             "import os\n",
@@ -118,11 +120,15 @@ def main():
             "DATA_DIR = next((p for p in _DIRS[DATASET] if os.path.isdir(p)), _DIRS[DATASET][0])\n",
             "\n",
             "# Model Selection Choices:\n",
-            "# TEXT_MODEL_NAME: 'google/flan-t5-small', 'google/flan-t5-base', 't5-small', 't5-base', 'razent/SciFive-base-PMC'\n",
-            "# VISUAL_BACKBONE: 'densenet121', 'resnet50', 'efficientnet_b0', 'efficientnet_b4'\n",
+            "# For VLM_ENGINE='pretrained': use 'google/medgemma-4b-it' or 'google/gemma-3-4b-it'\n",
+            "# For VLM_ENGINE='custom': use T5 decoders like 'razent/SciFive-base-PMC'\n",
             "if RUN_SIZE == 'full':\n",
-            "    TEXT_MODEL_NAME = 'razent/SciFive-base-PMC'\n",
-            "    VISUAL_BACKBONE = 'efficientnet_b4'\n",
+            "    if VLM_ENGINE == 'pretrained':\n",
+            "        TEXT_MODEL_NAME = 'google/medgemma-4b-it'\n",
+            "        VISUAL_BACKBONE = 'none'\n",
+            "    else:\n",
+            "        TEXT_MODEL_NAME = 'razent/SciFive-base-PMC'\n",
+            "        VISUAL_BACKBONE = 'efficientnet_b4'\n",
             "    VISION_T5_BATCH_SIZE = 4\n",
             "    VISION_T5_EPOCHS = 10\n",
             "else:\n",
@@ -134,9 +140,9 @@ def main():
             "FREEZE_VISUAL_ENCODER = True # Set to True to freeze visual encoder, False to fine-tune it\n",
             "MAX_NEW_TOKENS = 96 # Maximum generated report length\n",
             "RETRIEVAL_TOP_K = 10 # Retrieval candidates count\n",
-            "print(f'Configuration initialized. Run size: {RUN_SIZE}, Dataset: {DATASET}')\n",
+            "print(f'Configuration initialized. Run size: {RUN_SIZE}, Dataset: {DATASET}, Engine: {VLM_ENGINE}')\n",
             "print(f'Data Directory: {DATA_DIR}')\n",
-            "print(f'Using Model: Decoder={TEXT_MODEL_NAME}, Visual Backbone={VISUAL_BACKBONE}')\n",
+            "print(f'Using Model: Decoder/VLM={TEXT_MODEL_NAME}, Visual Backbone={VISUAL_BACKBONE}')\n",
             "print(f'Freeze Visual Encoder Backbone: {FREEZE_VISUAL_ENCODER}')"
         ]
     })
@@ -276,24 +282,20 @@ def main():
         "metadata": {},
         "outputs": [],
         "source": [
-            "# 5. Train Vision-T5 generator\n",
+            "# 5. Run VLM Generation (Pre-trained zero-shot or Custom Trained)\n",
+            "import os\n",
             "import torch\n",
-            "device_arg = 'cuda' if torch.cuda.is_available() else 'cpu'\n",
-            "print(f'Training on {device_arg}')\n",
-            "!python scripts/train_vision_t5_generator.py --epochs {VISION_T5_EPOCHS} --batch-size {VISION_T5_BATCH_SIZE} --text-model-name {TEXT_MODEL_NAME} --visual-backbone {VISUAL_BACKBONE} --freeze-visual-encoder {FREEZE_VISUAL_ENCODER} --device {device_arg}"
-        ]
-    })
-    
-    cells.append({
-        "cell_type": "code",
-        "execution_count": None,
-        "metadata": {},
-        "outputs": [],
-        "source": [
-            "# 6. Generate raw Vision-T5 predictions\n",
-            "import torch\n",
-            "device_arg = 'cuda' if torch.cuda.is_available() else 'cpu'\n",
-            "!python scripts/generate_vision_t5_reports.py --batch-size {VISION_T5_BATCH_SIZE} --max-new-tokens {MAX_NEW_TOKENS} --device {device_arg}"
+            "\n",
+            "if VLM_ENGINE == 'pretrained':\n",
+            "    print(f'Using Pre-trained VLM: {TEXT_MODEL_NAME} (Zero-Shot Mode). Skipping training.')\n",
+            "    !python scripts/generate_vlm_reports.py --model-name {TEXT_MODEL_NAME} --output-file output/vision_t5_raw.csv --quant 4bit\n",
+            "else:\n",
+            "    device_arg = 'cuda' if torch.cuda.is_available() else 'cpu'\n",
+            "    print(f'Training Custom Vision-T5 on {device_arg}...')\n",
+            "    !python scripts/train_vision_t5_generator.py --epochs {VISION_T5_EPOCHS} --batch-size {VISION_T5_BATCH_SIZE} --text-model-name {TEXT_MODEL_NAME} --visual-backbone {VISUAL_BACKBONE} --freeze-visual-encoder {FREEZE_VISUAL_ENCODER} --device {device_arg}\n",
+            "    \n",
+            "    print(f'Generating predictions with Custom Vision-T5 on {device_arg}...')\n",
+            "    !python scripts/generate_vision_t5_reports.py --batch-size {VISION_T5_BATCH_SIZE} --max-new-tokens {MAX_NEW_TOKENS} --device {device_arg}"
         ]
     })
     
