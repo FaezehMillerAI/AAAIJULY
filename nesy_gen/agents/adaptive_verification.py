@@ -48,10 +48,15 @@ class AdaptiveClaimVerifier:
         # Link entities first to check clinical substance
         linked_draft = self.kg_cache.link_entities(draft_report)
         
-        # Defensive fallback: if draft is empty, too short (under 10 words), or contains no clinical entities 
-        # (which typically happens with untrained/under-trained models in mock runs)
+        # Check maximum Jaccard similarity against top candidates to detect collapse/looping
+        max_support = 0.0
+        if retrieved_candidates:
+            max_support = max(jaccard_similarity(draft_report, cand["report"]) for cand in retrieved_candidates)
+            
+        # Defensive fallback: if draft is empty, too short (under 10 words), contains no clinical entities,
+        # or has extremely low alignment with retrieval candidates (indicates generator collapse/looping)
         clean_words = [w for w in re.findall(r'\w+', draft_report) if not w.isdigit()]
-        if len(clean_words) < 10 or len(linked_draft) == 0:
+        if len(clean_words) < 10 or len(linked_draft) == 0 or max_support < 0.25:
             if retrieved_candidates:
                 best_cand_text = retrieved_candidates[0]["report"]
                 best_score = -1.0
