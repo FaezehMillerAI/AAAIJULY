@@ -156,7 +156,21 @@ def main():
                     images = [images]
                     
                 for img in images:
-                    img_path = data_dir / img
+                    # Robust path resolution search
+                    img_paths_to_try = [
+                        data_dir / img,
+                        data_dir / "images" / img,
+                        data_dir / "images" / "images_normalized" / img,
+                        data_dir.parent / img,
+                        data_dir.parent / "images" / img,
+                        data_dir.parent / "images" / "images_normalized" / img
+                    ]
+                    img_path = img_paths_to_try[0]
+                    for p in img_paths_to_try:
+                        if p.exists():
+                            img_path = p
+                            break
+                            
                     examples.append({
                         "study_id": study_id,
                         "image_path": str(img_path.absolute()),
