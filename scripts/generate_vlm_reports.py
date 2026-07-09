@@ -88,10 +88,12 @@ def main():
             
         user_query = f"Generate report. Indication: {ind}."
         
-        # Format prompt according to Gemma chat template
+        # Format prompt universally (supported by Qwen-VL, Gemma, LLaVA, etc.)
         msgs = [
-            {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
-            {"role": "user", "content": [{"type": "image", "image": image}, {"type": "text", "text": user_query}]}
+            {"role": "user", "content": [
+                {"type": "image", "image": image},
+                {"type": "text", "text": f"{system_prompt}\n\n{user_query}"}
+            ]}
         ]
         
         try:

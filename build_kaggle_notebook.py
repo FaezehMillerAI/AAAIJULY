@@ -83,6 +83,18 @@ def main():
         ]
     })
     
+    cells.append({
+        "cell_type": "code",
+        "execution_count": None,
+        "metadata": {},
+        "outputs": [],
+        "source": [
+            "# Install required dependencies\n",
+            "!pip install -q -U transformers>=4.45.0 accelerate bitsandbytes scikit-learn qwen-vl-utils torchxrayvision\n",
+            "print('Dependencies installed successfully.')"
+        ]
+    })
+    
     # 2.5 Global Configurations
     cells.append({
         "cell_type": "markdown",
@@ -120,11 +132,11 @@ def main():
             "DATA_DIR = next((p for p in _DIRS[DATASET] if os.path.isdir(p)), _DIRS[DATASET][0])\n",
             "\n",
             "# Model Selection Choices:\n",
-            "# For VLM_ENGINE='pretrained': use 'google/medgemma-4b-it' or 'google/gemma-3-4b-it'\n",
+            "# For VLM_ENGINE='pretrained': use 'Qwen/Qwen2-VL-2B-Instruct' (ungated, recommended) or 'google/medgemma-4b-it' (gated)\n",
             "# For VLM_ENGINE='custom': use T5 decoders like 'razent/SciFive-base-PMC'\n",
             "if RUN_SIZE == 'full':\n",
             "    if VLM_ENGINE == 'pretrained':\n",
-            "        TEXT_MODEL_NAME = 'google/medgemma-4b-it'\n",
+            "        TEXT_MODEL_NAME = 'Qwen/Qwen2-VL-2B-Instruct'\n",
             "        VISUAL_BACKBONE = 'none'\n",
             "    else:\n",
             "        TEXT_MODEL_NAME = 'razent/SciFive-base-PMC'\n",
