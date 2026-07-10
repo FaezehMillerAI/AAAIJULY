@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 class RadiologyDataset(Dataset):
-    def __init__(self, examples: List[Dict[str, Any]], tokenizer, max_target_len: int = 128, max_source_len: int = 64):
+    def __init__(self, examples: List[Dict[str, Any]], tokenizer, max_target_len: int = 256, max_source_len: int = 96):
         self.examples = examples
         self.tokenizer = tokenizer
         self.max_target_len = max_target_len

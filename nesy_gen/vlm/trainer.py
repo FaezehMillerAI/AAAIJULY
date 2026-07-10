@@ -1,6 +1,7 @@
 import torch
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.cuda.amp import GradScaler, autocast
 import time
 from pathlib import Path
@@ -13,7 +14,7 @@ def train_model(
     val_dataset,
     epochs: int = 2,
     batch_size: int = 8,
-    lr: float = 1e-4,
+    lr: float = 5e-5,
     fp16: bool = True,
     device: str = "cuda",
     checkpoint_dir: Optional[Path] = None,
@@ -45,7 +46,8 @@ def train_model(
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=False)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     
-    optimizer = AdamW(model.parameters(), lr=lr)
+    optimizer = AdamW(model.parameters(), lr=lr, weight_decay=0.01)
+    scheduler = CosineAnnealingLR(optimizer, T_max=epochs * max(1, len(train_loader)))
     scaler = GradScaler(enabled=(autocast_dtype == torch.float16))
     
     best_val_loss = float("inf")
@@ -75,11 +77,15 @@ def train_model(
                 
             if autocast_dtype == torch.float16:
                 scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
+            scheduler.step()
             
             total_train_loss += loss.item()
             train_pbar.set_postfix({"loss": f"{loss.item():.4f}"})

@@ -140,8 +140,12 @@ class VisionT5(nn.Module):
             "d_model": self.d_model,
             "freeze_visual_encoder": self.freeze_visual_encoder,
             "num_visual_features": self.num_visual_features,
-            "visual_backbone": self.visual_backbone
+            "visual_backbone": self.visual_backbone,
+            "text_model_name": self.t5.config._name_or_path if hasattr(self.t5.config, "_name_or_path") else "razent/SciFive-base-PMC"
         }
+        with open(p / "config.json", "w") as f:
+            json.dump(config, f)
+        # Keep old name for backward compat
         with open(p / "r2gen_t5_config.json", "w") as f:
             json.dump(config, f)
             

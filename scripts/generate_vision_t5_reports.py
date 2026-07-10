@@ -47,7 +47,24 @@ def main():
     print("Loading tokenizer and model from checkpoint...")
     tokenizer = AutoTokenizer.from_pretrained(ckpt_dir / "tokenizer", use_fast=True)
     
-    model = VisionT5(freeze_visual_encoder=True)
+    # Load saved config to restore exact model arch that was trained
+    import json
+    config_path = ckpt_dir / "config.json"
+    ckpt_text_model = "razent/SciFive-base-PMC"
+    ckpt_visual_backbone = "densenet121"
+    ckpt_freeze = False
+    if config_path.exists():
+        with open(config_path) as f:
+            ckpt_cfg = json.load(f)
+        ckpt_text_model = ckpt_cfg.get("text_model_name", ckpt_text_model)
+        ckpt_visual_backbone = ckpt_cfg.get("visual_backbone", ckpt_visual_backbone)
+        ckpt_freeze = ckpt_cfg.get("freeze_visual_encoder", ckpt_freeze)
+    
+    model = VisionT5(
+        text_model_name=ckpt_text_model,
+        visual_backbone=ckpt_visual_backbone,
+        freeze_visual_encoder=ckpt_freeze
+    )
     model.load_checkpoint(ckpt_dir)
     model.to(device)
     model.eval()
@@ -70,13 +87,16 @@ def main():
             study_ids = batch["study_id"]
             refs = batch["raw_report"]
             
-            # Generate reports
+            # Generate reports with 4-beam search, length + repetition penalties
             generated_ids = model.generate(
                 images=images,
                 encoder_input_ids=enc_ids,
                 encoder_attention_mask=enc_mask,
-                max_length=args.max_new_tokens,
-                num_beams=2,
+                max_new_tokens=args.max_new_tokens,
+                num_beams=4,
+                length_penalty=1.5,    # encourage longer, more complete reports
+                repetition_penalty=2.0, # suppress repeated phrases
+                no_repeat_ngram_size=3, # prevent exact 3-gram repetition
                 early_stopping=True
             )
             
