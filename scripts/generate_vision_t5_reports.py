@@ -95,7 +95,7 @@ def main():
                 max_new_tokens=args.max_new_tokens,
                 num_beams=4,
                 length_penalty=1.5,    # encourage longer, more complete reports
-                repetition_penalty=2.0, # suppress repeated phrases
+                repetition_penalty=1.3, # mild penalty — SciFive sub-words need room (eff/pur/pul)
                 no_repeat_ngram_size=3, # prevent exact 3-gram repetition
                 early_stopping=True
             )

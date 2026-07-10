@@ -1,4 +1,5 @@
 import json
+import random
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -124,16 +125,15 @@ def generate_mock_manifest(output_dir: Path, image_dir: Path, num_train: int = 1
             img = Image.fromarray(img_arr, mode="L")
             img.save(image_path)
             
-            # Choose a combination of findings
-            import random
+            # Pick ONE indication and use it consistently in both the field and the report
             random.seed(idx)
+            indication = random.choice(indications_pool)
             f1 = random.choice(findings_pool)
             f2 = random.choice(findings_pool)
             while f2 == f1:
                 f2 = random.choice(findings_pool)
             
-            report = f"Chest X-ray. Indication: {random.choice(indications_pool)}. Findings: {f1}. {f2}. Impression: no acute cardiopulmonary process."
-            indication = random.choice(indications_pool)
+            report = f"Chest X-ray. Indication: {indication}. Findings: {f1}. {f2}. Impression: no acute cardiopulmonary process."
             
             examples.append({
                 "study_id": study_id,
