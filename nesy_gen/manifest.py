@@ -133,7 +133,7 @@ def generate_mock_manifest(output_dir: Path, image_dir: Path, num_train: int = 1
             while f2 == f1:
                 f2 = random.choice(findings_pool)
             
-            report = f"Chest X-ray. Indication: {indication}. Findings: {f1}. {f2}. Impression: no acute cardiopulmonary process."
+            report = f"{f1}. {f2}."
             
             examples.append({
                 "study_id": study_id,

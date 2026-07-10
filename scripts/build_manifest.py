@@ -105,8 +105,10 @@ def main():
                         image_path = p
                         break
                         
-                report = (row["findings"] + " " + row["impression"]).strip()
-                indication = extract_indication(report)
+                # Use only Findings — exclude Impression (per user preference)
+                findings_text = row["findings"].strip()
+                report = findings_text if findings_text else row["impression"].strip()
+                indication = extract_indication(row["impression"]) or extract_indication(row["findings"])
                 
                 if idx < train_end:
                     split = "train"
