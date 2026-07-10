@@ -169,52 +169,6 @@ def main():
         ]
     })
     
-    # 3. Add Package Files
-    cells.append({
-        "cell_type": "markdown",
-        "metadata": {},
-        "source": [
-            "## Section 1: Modular Package Structure\n",
-            "We now write out the modular codebase components."
-        ]
-    })
-    
-    for filepath, relative_name in package_files:
-        content = read_file_content(root / filepath)
-        cells.append({
-            "cell_type": "code",
-            "execution_count": None,
-            "metadata": {},
-            "outputs": [],
-            "source": [
-                f"%%writefile {relative_name}\n",
-                content
-            ]
-        })
-        
-    # 4. Add Script Files
-    cells.append({
-        "cell_type": "markdown",
-        "metadata": {},
-        "source": [
-            "## Section 2: Wrapper Scripts\n",
-            "We now write out the CLI wrapper scripts for each pipeline stage."
-        ]
-    })
-    
-    for filepath, relative_name in script_files:
-        content = read_file_content(root / filepath)
-        cells.append({
-            "cell_type": "code",
-            "execution_count": None,
-            "metadata": {},
-            "outputs": [],
-            "source": [
-                f"%%writefile {relative_name}\n",
-                content
-            ]
-        })
-        
     # 5. Run Manifest Build
     cells.append({
         "cell_type": "markdown",
