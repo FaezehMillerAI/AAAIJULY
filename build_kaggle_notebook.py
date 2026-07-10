@@ -63,6 +63,25 @@ def main():
         ]
     })
     
+    # 1.5 Git Clone Setup Cell
+    cells.append({
+        "cell_type": "code",
+        "execution_count": None,
+        "metadata": {},
+        "outputs": [],
+        "source": [
+            "# Clone the repository if not already present, or pull the latest updates\n",
+            "import os\n",
+            "if not os.path.exists('/kaggle/working/AAAIJULY'):\n",
+            "    print('Cloning repository from GitHub...')\n",
+            "    !git clone https://github.com/FaezehMillerAI/AAAIJULY.git /kaggle/working/AAAIJULY\n",
+            "else:\n",
+            "    print('Repository already exists. Fetching latest updates...')\n",
+            "    !git -C /kaggle/working/AAAIJULY fetch --all\n",
+            "    !git -C /kaggle/working/AAAIJULY reset --hard origin/main"
+        ]
+    })
+    
     # 2. Setup Directories
     cells.append({
         "cell_type": "code",
