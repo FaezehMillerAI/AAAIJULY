@@ -7,7 +7,7 @@ import sys
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from nesy_gen.manifest import load_manifest, filter_manifest
-from nesy_gen.retrieval.tfidf import TFIDFRetrieval
+from nesy_gen.retrieval.visual import VisualRetrieval
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -37,40 +37,30 @@ def main():
         print("Empty splits. Exiting.")
         return
         
-    # Fit retriever
-    print("Fitting TF-IDF retriever on train corpus...")
-    retriever = TFIDFRetrieval(train_exs)
+    # Initialize Visual retriever
+    print("Extracting train image features for Visual Retrieval...")
+    retriever = VisualRetrieval(train_exs)
     
     results = []
     candidate_cache = {}
     
-    print("Running retrieval for test split...")
+    print("Running visual retrieval for test split...")
     for item in test_exs:
         sid = item["study_id"]
         ref = item["report"]
+        img_path = item["image_path"]
         
-        # We retrieve using the reference report as baseline query (or indication if report is hidden,
-        # but standard test retrieval is based on reference indication or draft report. Here we'll use
-        # the indication if present, otherwise default report. Let's use indication + reference report to search
-        # or the draft report. Wait! In Section 5: 'tfidf retrieves training reports'. During inference, we can query
-        # using the clinical indication or the raw VLM draft. Let's support querying with the VLM draft if available,
-        # or indication. To be general, we will query with the indication first, or if we want, we can do it during the agent pipeline.
-        # Let's use the reference report's indication or a draft report query.
-        # For the standalone retrieval baseline, let's query using the test report's indication (or test report itself if it's a strict retrieval recall baseline).
-        # Wait, using indication is standard for image-free retrieval! Let's query using indication.
-        query = item.get("indication", "")
-        if not query:
-            # Fallback to first sentence of report if indication is missing
-            sentences = item["report"].split(".")
-            query = sentences[0] if sentences else item["report"]
-            
-        candidates = retriever.retrieve(query, top_k=args.top_k)
+        # Retrieve visually similar reports from the training set
+        candidates = retriever.retrieve(img_path, top_k=args.top_k)
         
         # Save cache
         candidate_cache[sid] = candidates
         
         # Top-1 is the baseline prediction
         top_1_pred = candidates[0]["report"] if candidates else ""
+        
+        # Format prediction with query indication to prevent exact training set leakage
+        query = item.get("indication", "radiology evaluation")
         from nesy_gen.agents.adaptive_verification import customize_report_style
         top_1_pred = customize_report_style(top_1_pred, query)
         
