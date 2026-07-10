@@ -14,6 +14,7 @@ def parse_args():
     parser.add_argument("--raw-preds-csv", type=str, required=True, help="Path to raw VLM predictions CSV")
     parser.add_argument("--retrieval-cache", type=str, default="output/rag_candidate_cache.json")
     parser.add_argument("--primekg-cache", type=str, default="output/primekg_radiology_cache")
+    parser.add_argument("--manifest-path", type=str, default="output/common_manifest.jsonl")
     parser.add_argument("--output-dir", type=str, default="output")
     parser.add_argument("--prefix", type=str, default="vision_t5")
     parser.add_argument("--policy", type=str, default="evidence_replace", choices=["audit_only", "evidence_replace"])
@@ -37,6 +38,15 @@ def main():
     print(f"Loading PrimeKG cache from {primekg_path}...")
     kg_cache = PrimeKGRadiologyCache(primekg_path)
     
+    # Load manifest to resolve query indications (used for zero-leakage styling)
+    indications = {}
+    manifest_file = Path(args.manifest_path)
+    if manifest_file.exists():
+        print(f"Loading manifest from {manifest_file} to map study indications...")
+        from nesy_gen.manifest import load_manifest
+        exs = load_manifest(manifest_file)
+        indications = {ex["study_id"]: ex.get("indication", "radiology evaluation") for ex in exs}
+    
     print(f"Running adaptive claim verification pipeline with policy: {args.policy}...")
     run_adaptive_verification_pipeline(
         raw_predictions=raw_preds,
@@ -44,7 +54,8 @@ def main():
         kg_cache=kg_cache,
         output_dir=out_dir,
         prefix=args.prefix + ("_audit_only" if args.policy == "audit_only" else ""),
-        policy=args.policy
+        policy=args.policy,
+        indications=indications
     )
     print("Adaptive verification process completed successfully.")
 

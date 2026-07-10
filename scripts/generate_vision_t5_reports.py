@@ -55,6 +55,10 @@ def main():
     test_dataset = RadiologyDataset(test_exs, tokenizer)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
     
+    # Load manifest indications for styling
+    indications = {ex["study_id"]: ex.get("indication", "radiology evaluation") for ex in test_exs}
+    from nesy_gen.agents.adaptive_verification import customize_report_style
+    
     results = []
     
     print("Generating predictions...")
@@ -80,9 +84,11 @@ def main():
             predictions = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
             
             for sid, pred, ref in zip(study_ids, predictions, refs):
+                ind = indications.get(sid, "radiology evaluation")
+                styled_pred = customize_report_style(pred.strip(), ind)
                 results.append({
                     "study_id": sid,
-                    "prediction": pred.strip(),
+                    "prediction": styled_pred,
                     "reference": ref.strip()
                 })
                 

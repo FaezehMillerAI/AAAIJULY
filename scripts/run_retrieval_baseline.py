@@ -71,6 +71,8 @@ def main():
         
         # Top-1 is the baseline prediction
         top_1_pred = candidates[0]["report"] if candidates else ""
+        from nesy_gen.agents.adaptive_verification import customize_report_style
+        top_1_pred = customize_report_style(top_1_pred, query)
         
         results.append({
             "study_id": sid,

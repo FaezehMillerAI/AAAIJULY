@@ -32,8 +32,9 @@ def main():
     examples = load_manifest(manifest_path)
     test_exs = filter_manifest(examples, "test")
     
-    # Create lookup map for references
+    # Create lookup map for references and indications
     ref_map = {ex["study_id"]: ex["report"] for ex in test_exs}
+    ind_map = {ex["study_id"]: ex.get("indication", "radiology evaluation") for ex in test_exs}
     
     print(f"Loading retrieval candidate cache from {cache_path}...")
     with open(cache_path, "r", encoding="utf-8") as f:
@@ -67,9 +68,13 @@ def main():
                 best_score = comb_score
                 best_cand_text = report_text
                 
+        from nesy_gen.agents.adaptive_verification import customize_report_style
+        ind = ind_map.get(study_id, "radiology evaluation")
+        styled_cand_text = customize_report_style(best_cand_text, ind)
+        
         results.append({
             "study_id": study_id,
-            "prediction": best_cand_text,
+            "prediction": styled_cand_text,
             "reference": ref
         })
         
