@@ -54,9 +54,14 @@ def compute_cider_approx(preds: List[str], refs: List[str]) -> float:
     Computes a simplified corpus-level CIDEr metric based on n-grams (1 to 4) 
     weighted by corpus-level TF-IDF.
     """
+    # Strip prefix pattern
+    preds = [re.sub(r'(?i)^radiology report for indication:.*?\.\s*', '', p) for p in preds]
+    refs = [re.sub(r'(?i)^radiology report for indication:.*?\.\s*', '', r) for r in refs]
+
     # Tokenize everything
     pred_tokens = [re.findall(r'\w+', p.lower()) for p in preds]
     ref_tokens = [re.findall(r'\w+', r.lower()) for r in refs]
+
     
     # Calculate DF (Document Frequency) of n-grams in references
     df = {n: Counter() for n in range(1, 5)}
@@ -117,8 +122,13 @@ def compute_lexical_metrics(preds: List[str], refs: List[str]) -> Dict[str, floa
     """Computes BLEU-1..4, ROUGE-L, and approximate CIDEr."""
     from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
     
+    # Strip prefix pattern
+    preds = [re.sub(r'(?i)^radiology report for indication:.*?\.\s*', '', p) for p in preds]
+    refs = [re.sub(r'(?i)^radiology report for indication:.*?\.\s*', '', r) for r in refs]
+
     b1_list, b2_list, b3_list, b4_list = [], [], [], []
     rouge_list = []
+
     
     smooth = SmoothingFunction().method1
     
