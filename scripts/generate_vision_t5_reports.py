@@ -18,7 +18,7 @@ def parse_args():
     parser.add_argument("--manifest-path", type=str, default="output/common_manifest.jsonl")
     parser.add_argument("--checkpoint-dir", type=str, default="output/vision_t5_checkpoint")
     parser.add_argument("--output-file", type=str, default="output/vision_t5_raw.csv")
-    parser.add_argument("--max-new-tokens", type=int, default=96)
+    parser.add_argument("--max-new-tokens", type=int, default=128)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--device", type=str, default="cuda")
     return parser.parse_args()
@@ -50,20 +50,26 @@ def main():
     # Load saved config to restore exact model arch that was trained
     import json
     config_path = ckpt_dir / "config.json"
-    ckpt_text_model = "razent/SciFive-base-PMC"
-    ckpt_visual_backbone = "densenet121"
-    ckpt_freeze = False
+    ckpt_text_model        = "razent/SciFive-base-PMC"
+    ckpt_visual_backbone   = "swin_tiny"
+    ckpt_freeze            = False
+    ckpt_diag_prompts      = True
+    ckpt_cls_lambda        = 0.5
     if config_path.exists():
         with open(config_path) as f:
             ckpt_cfg = json.load(f)
-        ckpt_text_model = ckpt_cfg.get("text_model_name", ckpt_text_model)
-        ckpt_visual_backbone = ckpt_cfg.get("visual_backbone", ckpt_visual_backbone)
-        ckpt_freeze = ckpt_cfg.get("freeze_visual_encoder", ckpt_freeze)
-    
+        ckpt_text_model      = ckpt_cfg.get("text_model_name",       ckpt_text_model)
+        ckpt_visual_backbone = ckpt_cfg.get("visual_backbone",       ckpt_visual_backbone)
+        ckpt_freeze          = ckpt_cfg.get("freeze_visual_encoder", ckpt_freeze)
+        ckpt_diag_prompts    = ckpt_cfg.get("use_diagnosis_prompts", ckpt_diag_prompts)
+        ckpt_cls_lambda      = ckpt_cfg.get("cls_lambda",            ckpt_cls_lambda)
+
     model = VisionT5(
         text_model_name=ckpt_text_model,
         visual_backbone=ckpt_visual_backbone,
-        freeze_visual_encoder=ckpt_freeze
+        freeze_visual_encoder=ckpt_freeze,
+        use_diagnosis_prompts=ckpt_diag_prompts,
+        cls_lambda=ckpt_cls_lambda,
     )
     model.load_checkpoint(ckpt_dir)
     model.to(device)
@@ -87,17 +93,18 @@ def main():
             study_ids = batch["study_id"]
             refs = batch["raw_report"]
             
-            # Generate reports with 4-beam search, length + repetition penalties
+            # Generate: model.generate() runs classifier → injects diagnosis prefix → decodes
             generated_ids = model.generate(
                 images=images,
                 encoder_input_ids=enc_ids,
                 encoder_attention_mask=enc_mask,
+                tokenizer=tokenizer,               # enables diagnosis-prompt injection
                 max_new_tokens=args.max_new_tokens,
                 num_beams=4,
-                length_penalty=1.5,    # encourage longer, more complete reports
-                repetition_penalty=1.3, # mild penalty — SciFive sub-words need room (eff/pur/pul)
-                no_repeat_ngram_size=3, # prevent exact 3-gram repetition
-                early_stopping=True
+                length_penalty=1.5,
+                repetition_penalty=1.3,
+                no_repeat_ngram_size=3,
+                early_stopping=True,
             )
             
             # Decode

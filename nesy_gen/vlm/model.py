@@ -1,177 +1,367 @@
 import torch
 import torch.nn as nn
 import torchvision
-from transformers import T5ForConditionalGeneration, T5Config
+from transformers import T5ForConditionalGeneration
 from transformers.modeling_outputs import BaseModelOutput
+from .chexpert_labels import CHEXPERT_LABELS, labels_to_prompt_prefix
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VisionT5 with Swin-T backbone + Diagnosis Classification Branch
+# Architecture inspired by:
+#   R2GenGPT  (Swin-T → frozen LLM, BLEU-1 0.491 IU-Xray)
+#   PromptMRG (Diagnosis classification → token prompts, AAAI 2024)
+#   KiUT      (knowledge-injected U-Transformer, CVPR 2023)
+# ─────────────────────────────────────────────────────────────────────────────
 
 class VisionT5(nn.Module):
-    def __init__(self, text_model_name: str = "t5-small", visual_backbone: str = "densenet121", freeze_visual_encoder: bool = True):
+    def __init__(
+        self,
+        text_model_name: str = "razent/SciFive-base-PMC",
+        visual_backbone: str = "swin_tiny",
+        freeze_visual_encoder: bool = False,
+        use_diagnosis_prompts: bool = True,
+        cls_lambda: float = 0.5,
+    ):
+        """
+        Args:
+            text_model_name:        HuggingFace T5 model identifier.
+            visual_backbone:        One of 'swin_tiny', 'swin_base',
+                                    'densenet121', 'resnet50',
+                                    'efficientnet_b0', 'efficientnet_b4'.
+            freeze_visual_encoder:  If True, visual encoder weights are frozen.
+            use_diagnosis_prompts:  If True, prepend predicted CheXpert labels
+                                    to the encoder prompt during generation.
+            cls_lambda:             Weight of classification BCE loss relative
+                                    to generation CE loss.
+        """
         super().__init__()
         self.freeze_visual_encoder = freeze_visual_encoder
         self.visual_backbone = visual_backbone
-        
-        # Initialize visual backbone features
+        self.use_diagnosis_prompts = use_diagnosis_prompts
+        self.cls_lambda = cls_lambda
+        self.num_chexpert_labels = len(CHEXPERT_LABELS)
+
+        # ── 1. Visual encoder ──────────────────────────────────────────────
         self._init_visual_encoder(visual_backbone)
-                
-        # Load T5 model
+
+        # ── 2. T5 text decoder ────────────────────────────────────────────
         self.t5 = T5ForConditionalGeneration.from_pretrained(text_model_name)
         self.d_model = self.t5.config.d_model
-        
-        # Projection layer: maps visual features to T5 embedding space (d_model)
+
+        # ── 3. Visual → T5 projection ─────────────────────────────────────
         self.proj = nn.Linear(self.num_visual_features, self.d_model)
 
+        # ── 4. Diagnosis classification branch (PromptMRG-style) ──────────
+        # Global-pooled visual features → CheXpert-14 logits
+        self.classifier = nn.Linear(self.num_visual_features, self.num_chexpert_labels)
+        self._cls_criterion = nn.BCEWithLogitsLoss()
+
+    # ── Visual encoder initialisation ──────────────────────────────────────
     def _init_visual_encoder(self, visual_backbone: str):
-        if visual_backbone == "densenet121":
-            self.visual_encoder = torchvision.models.densenet121(weights=torchvision.models.DenseNet121_Weights.DEFAULT)
-            self.visual_features = self.visual_encoder.features
+        """Initialises the visual backbone and sets self.num_visual_features
+        and self.is_swin (True if output is already (B, N, C))."""
+        self.is_swin = False
+
+        if visual_backbone == "swin_tiny":
+            try:
+                import timm
+            except ImportError:
+                raise ImportError("timm is required for Swin backbone: pip install timm")
+            # global_pool='' → returns (B, H, W, C) spatial features
+            self.visual_features = timm.create_model(
+                "swin_tiny_patch4_window7_224",
+                pretrained=True,
+                num_classes=0,
+                global_pool="",
+            )
+            self.num_visual_features = 768   # Swin-T last-stage channels
+            self.is_swin = True
+
+        elif visual_backbone == "swin_base":
+            try:
+                import timm
+            except ImportError:
+                raise ImportError("timm is required for Swin backbone: pip install timm")
+            self.visual_features = timm.create_model(
+                "swin_base_patch4_window7_224",
+                pretrained=True,
+                num_classes=0,
+                global_pool="",
+            )
+            self.num_visual_features = 1024  # Swin-B last-stage channels
+            self.is_swin = True
+
+        elif visual_backbone == "densenet121":
+            enc = torchvision.models.densenet121(
+                weights=torchvision.models.DenseNet121_Weights.DEFAULT
+            )
+            self.visual_features = enc.features
             self.num_visual_features = 1024
+
         elif visual_backbone == "resnet50":
-            self.visual_encoder = torchvision.models.resnet50(weights=torchvision.models.ResNet50_Weights.DEFAULT)
-            self.visual_features = nn.Sequential(*list(self.visual_encoder.children())[:-2])
+            enc = torchvision.models.resnet50(
+                weights=torchvision.models.ResNet50_Weights.DEFAULT
+            )
+            self.visual_features = nn.Sequential(*list(enc.children())[:-2])
             self.num_visual_features = 2048
+
         elif visual_backbone == "efficientnet_b0":
-            self.visual_encoder = torchvision.models.efficientnet_b0(weights=torchvision.models.EfficientNet_B0_Weights.DEFAULT)
-            self.visual_features = self.visual_encoder.features
+            enc = torchvision.models.efficientnet_b0(
+                weights=torchvision.models.EfficientNet_B0_Weights.DEFAULT
+            )
+            self.visual_features = enc.features
             self.num_visual_features = 1280
+
         elif visual_backbone == "efficientnet_b4":
-            self.visual_encoder = torchvision.models.efficientnet_b4(weights=torchvision.models.EfficientNet_B4_Weights.DEFAULT)
-            self.visual_features = self.visual_encoder.features
+            enc = torchvision.models.efficientnet_b4(
+                weights=torchvision.models.EfficientNet_B4_Weights.DEFAULT
+            )
+            self.visual_features = enc.features
             self.num_visual_features = 1792
+
         else:
-            raise ValueError(f"Unsupported visual backbone: {visual_backbone}")
-            
+            raise ValueError(f"Unsupported visual backbone: {visual_backbone!r}")
+
         if self.freeze_visual_encoder:
             for param in self.visual_features.parameters():
                 param.requires_grad = False
-        
-    def forward(self, images, decoder_input_ids=None, labels=None, encoder_input_ids=None, encoder_attention_mask=None):
-        # Extract visual features
-        if self.freeze_visual_encoder:
-            with torch.no_grad():
-                # We put visual features in eval mode if frozen
-                self.visual_features.eval()
-                visual_feats = self.visual_features(images)  # Shape: (batch, 1024, 7, 7)
-        else:
-            visual_feats = self.visual_features(images)
-            
-        batch_size = visual_feats.size(0)
-        
-        # Reshape to sequence of visual tokens: (batch, num_tokens, num_visual_features)
-        # 7x7 = 49 visual tokens
-        visual_feats = visual_feats.flatten(2).transpose(1, 2)  # (batch, 49, 1024)
-        visual_tokens = self.proj(visual_feats)  # (batch, 49, d_model)
-        
-        # If encoder text input is provided, encode it and concatenate
-        if encoder_input_ids is not None:
-            text_encoder_outputs = self.t5.encoder(input_ids=encoder_input_ids, attention_mask=encoder_attention_mask)
-            text_feats = text_encoder_outputs.last_hidden_state  # (batch, seq_len, d_model)
-            
-            # Combine visual tokens and text tokens
-            combined_tokens = torch.cat([visual_tokens, text_feats], dim=1)  # (batch, 49 + seq_len, d_model)
-            
-            # Combine attention masks
-            vis_attention_mask = torch.ones((batch_size, visual_tokens.size(1)), dtype=torch.long, device=images.device)
-            if encoder_attention_mask is not None:
-                combined_attention_mask = torch.cat([vis_attention_mask, encoder_attention_mask], dim=1)
-            else:
-                combined_attention_mask = vis_attention_mask
-        else:
-            combined_tokens = visual_tokens
-            combined_attention_mask = torch.ones((batch_size, visual_tokens.size(1)), dtype=torch.long, device=images.device)
-            
-        # Create BaseModelOutput for encoder_outputs
-        encoder_outputs = BaseModelOutput(last_hidden_state=combined_tokens)
-        
-        outputs = self.t5(
-            decoder_input_ids=decoder_input_ids,
-            encoder_outputs=encoder_outputs,
-            attention_mask=combined_attention_mask,
-            labels=labels
-        )
-        return outputs
 
-    def generate(self, images, encoder_input_ids=None, encoder_attention_mask=None, **kwargs):
-        # Extract visual features
-        with torch.no_grad():
-            self.visual_features.eval()
-            visual_feats = self.visual_features(images)
-            visual_feats = visual_feats.flatten(2).transpose(1, 2)
-            visual_tokens = self.proj(visual_feats)
-            
-            batch_size = visual_feats.size(0)
-            if encoder_input_ids is not None:
-                text_encoder_outputs = self.t5.encoder(input_ids=encoder_input_ids, attention_mask=encoder_attention_mask)
-                text_feats = text_encoder_outputs.last_hidden_state
-                combined_tokens = torch.cat([visual_tokens, text_feats], dim=1)
-                vis_attention_mask = torch.ones((batch_size, visual_tokens.size(1)), dtype=torch.long, device=images.device)
-                if encoder_attention_mask is not None:
-                    combined_attention_mask = torch.cat([vis_attention_mask, encoder_attention_mask], dim=1)
-                else:
-                    combined_attention_mask = vis_attention_mask
-            else:
-                combined_tokens = visual_tokens
-                combined_attention_mask = torch.ones((batch_size, visual_tokens.size(1)), dtype=torch.long, device=images.device)
-                
-            encoder_outputs = BaseModelOutput(last_hidden_state=combined_tokens)
-            
-            return self.t5.generate(
-                encoder_outputs=encoder_outputs,
-                attention_mask=combined_attention_mask,
-                **kwargs
+    # ── Shared feature extraction ──────────────────────────────────────────
+    def _extract_visual_features(self, images: torch.Tensor, frozen_ctx: bool = False):
+        """
+        Returns:
+            spatial_feats: (B, N, C)  — sequence of patch tokens for T5
+            pooled_feats:  (B, C)     — global-pooled features for classifier
+        """
+        if frozen_ctx or (self.freeze_visual_encoder and not self.training):
+            ctx = torch.no_grad()
+        else:
+            from contextlib import nullcontext
+            ctx = nullcontext()
+
+        with ctx:
+            if self.freeze_visual_encoder:
+                self.visual_features.eval()
+            raw = self.visual_features(images)
+
+        # ── Swin returns (B, H, W, C) or (B, H*W, C) depending on timm ver ──
+        if self.is_swin:
+            if raw.dim() == 4:          # (B, H, W, C)
+                B, H, W, C = raw.shape
+                spatial_feats = raw.reshape(B, H * W, C)   # (B, 49, 768)
+            else:                        # (B, N, C) already
+                spatial_feats = raw
+        else:
+            # CNN: (B, C, H, W) → (B, N, C)
+            spatial_feats = raw.flatten(2).transpose(1, 2)
+
+        pooled_feats = spatial_feats.mean(dim=1)   # (B, C)
+        return spatial_feats, pooled_feats
+
+    # ── Forward (training) ────────────────────────────────────────────────
+    def forward(
+        self,
+        images,
+        decoder_input_ids=None,
+        labels=None,
+        encoder_input_ids=None,
+        encoder_attention_mask=None,
+        chexpert_labels=None,          # (B, 14) float tensor for classification
+    ):
+        spatial_feats, pooled_feats = self._extract_visual_features(images)
+
+        batch_size = spatial_feats.size(0)
+        device     = images.device
+
+        # ── Classification branch ─────────────────────────────────────────
+        cls_logits = self.classifier(pooled_feats)   # (B, 14)
+        cls_loss   = torch.tensor(0.0, device=device)
+        if chexpert_labels is not None:
+            cls_loss = self._cls_criterion(
+                cls_logits, chexpert_labels.float().to(device)
             )
-            
+
+        # ── Visual tokens → T5 embedding space ───────────────────────────
+        visual_tokens = self.proj(spatial_feats)     # (B, N, d_model)
+
+        # ── Combine with text encoder output ─────────────────────────────
+        vis_mask = torch.ones(
+            (batch_size, visual_tokens.size(1)), dtype=torch.long, device=device
+        )
+        if encoder_input_ids is not None:
+            text_out = self.t5.encoder(
+                input_ids=encoder_input_ids,
+                attention_mask=encoder_attention_mask,
+            )
+            combined = torch.cat([visual_tokens, text_out.last_hidden_state], dim=1)
+            combined_mask = (
+                torch.cat([vis_mask, encoder_attention_mask], dim=1)
+                if encoder_attention_mask is not None
+                else vis_mask
+            )
+        else:
+            combined      = visual_tokens
+            combined_mask = vis_mask
+
+        enc_out = BaseModelOutput(last_hidden_state=combined)
+        t5_out  = self.t5(
+            decoder_input_ids=decoder_input_ids,
+            encoder_outputs=enc_out,
+            attention_mask=combined_mask,
+            labels=labels,
+        )
+
+        # ── Combined loss: generation CE + λ × classification BCE ─────────
+        gen_loss   = t5_out.loss
+        total_loss = gen_loss + self.cls_lambda * cls_loss
+
+        # Monkey-patch loss so trainer code stays unchanged
+        t5_out.loss      = total_loss
+        t5_out.gen_loss  = gen_loss
+        t5_out.cls_loss  = cls_loss
+        t5_out.cls_logits = cls_logits
+        return t5_out
+
+    # ── Generate (inference) ──────────────────────────────────────────────
+    def generate(
+        self,
+        images,
+        encoder_input_ids=None,
+        encoder_attention_mask=None,
+        tokenizer=None,
+        **kwargs,
+    ):
+        """
+        At inference:
+          1. Run visual encoder → classifier → predicted CheXpert labels
+          2. If use_diagnosis_prompts, prepend diagnosis prefix to prompt
+          3. Run T5 generate
+        """
+        with torch.no_grad():
+            spatial_feats, pooled_feats = self._extract_visual_features(images, frozen_ctx=True)
+
+            batch_size = spatial_feats.size(0)
+            device     = images.device
+
+            # ── Step 1: predict diagnosis labels ─────────────────────────
+            cls_logits  = self.classifier(pooled_feats)      # (B, 14)
+            cls_probs   = torch.sigmoid(cls_logits)          # (B, 14)
+            pred_labels = (cls_probs > 0.5).cpu().tolist()   # list[list[bool]]
+
+            # ── Step 2: inject diagnosis prefix into encoder prompt ───────
+            if self.use_diagnosis_prompts and tokenizer is not None and encoder_input_ids is not None:
+                # Decode existing prompt tokens
+                raw_prompts = tokenizer.batch_decode(
+                    encoder_input_ids, skip_special_tokens=True
+                )
+                # Build augmented prompts: "diagnosis: X, Y. generate report: <indication>"
+                aug_prompts = []
+                for prompt_text, lbl_vec in zip(raw_prompts, pred_labels):
+                    prefix = labels_to_prompt_prefix([float(v) for v in lbl_vec])
+                    aug = f"{prefix} {prompt_text}".strip() if prefix else prompt_text
+                    aug_prompts.append(aug)
+
+                # Re-encode augmented prompts
+                enc = tokenizer(
+                    aug_prompts,
+                    max_length=encoder_input_ids.size(1) + 32,
+                    padding="max_length",
+                    truncation=True,
+                    return_tensors="pt",
+                ).to(device)
+                encoder_input_ids    = enc["input_ids"]
+                encoder_attention_mask = enc["attention_mask"]
+
+            # ── Step 3: project visual tokens ────────────────────────────
+            visual_tokens = self.proj(spatial_feats)        # (B, N, d_model)
+            vis_mask = torch.ones(
+                (batch_size, visual_tokens.size(1)), dtype=torch.long, device=device
+            )
+
+            if encoder_input_ids is not None:
+                text_out = self.t5.encoder(
+                    input_ids=encoder_input_ids,
+                    attention_mask=encoder_attention_mask,
+                )
+                combined      = torch.cat([visual_tokens, text_out.last_hidden_state], dim=1)
+                combined_mask = (
+                    torch.cat([vis_mask, encoder_attention_mask], dim=1)
+                    if encoder_attention_mask is not None
+                    else vis_mask
+                )
+            else:
+                combined      = visual_tokens
+                combined_mask = vis_mask
+
+            enc_out = BaseModelOutput(last_hidden_state=combined)
+            return self.t5.generate(
+                encoder_outputs=enc_out,
+                attention_mask=combined_mask,
+                **kwargs,
+            )
+
+    # ── Checkpoint ────────────────────────────────────────────────────────
     def save_checkpoint(self, path: str):
         import json
         from pathlib import Path
         p = Path(path)
         p.mkdir(parents=True, exist_ok=True)
-        
-        # Save PyTorch states
-        torch.save({
-            "proj_state_dict": self.proj.state_dict(),
-            "visual_features_state_dict": self.visual_features.state_dict() if not self.freeze_visual_encoder else None
-        }, p / "vision_t5_weights.bin")
-        
-        # Save T5 model checkpoint
+
+        torch.save(
+            {
+                "proj_state_dict":            self.proj.state_dict(),
+                "classifier_state_dict":      self.classifier.state_dict(),
+                "visual_features_state_dict": (
+                    self.visual_features.state_dict()
+                    if not self.freeze_visual_encoder
+                    else None
+                ),
+            },
+            p / "vision_t5_weights.bin",
+        )
         self.t5.save_pretrained(p / "text_model")
-        
-        # Save custom config
+
         config = {
-            "d_model": self.d_model,
+            "d_model":               self.d_model,
             "freeze_visual_encoder": self.freeze_visual_encoder,
-            "num_visual_features": self.num_visual_features,
-            "visual_backbone": self.visual_backbone,
-            "text_model_name": self.t5.config._name_or_path if hasattr(self.t5.config, "_name_or_path") else "razent/SciFive-base-PMC"
+            "num_visual_features":   self.num_visual_features,
+            "visual_backbone":       self.visual_backbone,
+            "use_diagnosis_prompts": self.use_diagnosis_prompts,
+            "cls_lambda":            self.cls_lambda,
+            "text_model_name": (
+                self.t5.config._name_or_path
+                if hasattr(self.t5.config, "_name_or_path")
+                else "razent/SciFive-base-PMC"
+            ),
         }
-        with open(p / "config.json", "w") as f:
-            json.dump(config, f)
-        # Keep old name for backward compat
-        with open(p / "r2gen_t5_config.json", "w") as f:
-            json.dump(config, f)
-            
+        for fname in ("config.json", "r2gen_t5_config.json"):
+            with open(p / fname, "w") as f:
+                json.dump(config, f, indent=2)
+
     def load_checkpoint(self, path: str):
         import json
         from pathlib import Path
         p = Path(path)
-        
-        # Load config to configure backbone dynamically
-        with open(p / "r2gen_t5_config.json", "r") as f:
+
+        cfg_file = p / "config.json" if (p / "config.json").exists() else p / "r2gen_t5_config.json"
+        with open(cfg_file) as f:
             config = json.load(f)
-            
+
         self.freeze_visual_encoder = config.get("freeze_visual_encoder", self.freeze_visual_encoder)
-        self.visual_backbone = config.get("visual_backbone", "densenet121")
-        
-        # T5 load first to set text model d_model
-        self.t5 = T5ForConditionalGeneration.from_pretrained(p / "text_model")
+        self.visual_backbone       = config.get("visual_backbone", "swin_tiny")
+        self.use_diagnosis_prompts = config.get("use_diagnosis_prompts", True)
+        self.cls_lambda            = config.get("cls_lambda", 0.5)
+
+        self.t5      = T5ForConditionalGeneration.from_pretrained(p / "text_model")
         self.d_model = self.t5.config.d_model
-        
-        # Re-initialize visual backbone
+
         self._init_visual_encoder(self.visual_backbone)
-        
-        # Re-initialize projection layer
-        self.proj = nn.Linear(self.num_visual_features, self.d_model)
-        
+        self.proj       = nn.Linear(self.num_visual_features, self.d_model)
+        self.classifier = nn.Linear(self.num_visual_features, self.num_chexpert_labels)
+
         weights = torch.load(p / "vision_t5_weights.bin", map_location="cpu")
         self.proj.load_state_dict(weights["proj_state_dict"])
-        if weights["visual_features_state_dict"] is not None and not self.freeze_visual_encoder:
+        if "classifier_state_dict" in weights:
+            self.classifier.load_state_dict(weights["classifier_state_dict"])
+        if weights.get("visual_features_state_dict") is not None and not self.freeze_visual_encoder:
             self.visual_features.load_state_dict(weights["visual_features_state_dict"])

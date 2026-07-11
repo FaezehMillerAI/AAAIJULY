@@ -25,11 +25,17 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest-path", type=str, default="output/common_manifest.jsonl")
     parser.add_argument("--text-model-name", type=str, default="razent/SciFive-base-PMC")
-    parser.add_argument("--visual-backbone", type=str, default="densenet121")
-    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--visual-backbone", type=str, default="swin_tiny",
+                        choices=["swin_tiny", "swin_base", "densenet121", "resnet50",
+                                 "efficientnet_b0", "efficientnet_b4"])
+    parser.add_argument("--epochs", type=int, default=15)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--freeze-visual-encoder", type=str2bool, default=False)
+    parser.add_argument("--use-diagnosis-prompts", type=str2bool, default=True,
+                        help="Prepend CheXpert-14 diagnosis prefix to encoder prompt")
+    parser.add_argument("--cls-lambda", type=float, default=0.5,
+                        help="Weight of classification BCE loss")
     parser.add_argument("--fp16", type=str2bool, default=True)
     parser.add_argument("--output-dir", type=str, default="output/vision_t5_checkpoint")
     parser.add_argument("--device", type=str, default="cuda")
@@ -52,16 +58,24 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(args.text_model_name, use_fast=True)
     
     # Initialize model
-    print("Initializing VisionT5 model...")
+    print("Initializing VisionT5 model (Swin-T + Diagnosis Classifier)...")
     model = VisionT5(
         text_model_name=args.text_model_name,
         visual_backbone=args.visual_backbone,
-        freeze_visual_encoder=args.freeze_visual_encoder
+        freeze_visual_encoder=args.freeze_visual_encoder,
+        use_diagnosis_prompts=args.use_diagnosis_prompts,
+        cls_lambda=args.cls_lambda,
     )
-    
+
     # Initialize datasets
-    train_dataset = RadiologyDataset(train_exs, tokenizer)
-    val_dataset = RadiologyDataset(val_exs, tokenizer)
+    train_dataset = RadiologyDataset(
+        train_exs, tokenizer,
+        use_diagnosis_prompts=args.use_diagnosis_prompts,
+    )
+    val_dataset = RadiologyDataset(
+        val_exs, tokenizer,
+        use_diagnosis_prompts=args.use_diagnosis_prompts,
+    )
     
     # Start training
     print("Starting training...")

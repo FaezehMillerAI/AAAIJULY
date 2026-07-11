@@ -115,7 +115,7 @@ def main():
         "outputs": [],
         "source": [
             "# Install required dependencies\n",
-            "!pip install -q -U transformers>=4.45.0 accelerate bitsandbytes scikit-learn qwen-vl-utils torchxrayvision\n",
+            "!pip install -q -U transformers>=4.45.0 accelerate bitsandbytes scikit-learn qwen-vl-utils torchxrayvision timm\n",
             "print('Dependencies installed successfully.')"
         ]
     })
@@ -143,9 +143,9 @@ def main():
             "\n",
             "# Model selection parameters for VLM_ENGINE='custom':\n",
             "# CUSTOM_TEXT_MODEL choices: 'razent/SciFive-base-PMC', 't5-base', 't5-small', 'google/flan-t5-base'\n",
-            "# CUSTOM_VISUAL_BACKBONE choices: 'densenet121', 'resnet50', 'efficientnet_b0', 'efficientnet_b4'\n",
+            "# CUSTOM_VISUAL_BACKBONE choices: 'swin_tiny' (recommended), 'swin_base', 'densenet121', 'resnet50', 'efficientnet_b0'\n",
             "CUSTOM_TEXT_MODEL = 'razent/SciFive-base-PMC'\n",
-            "CUSTOM_VISUAL_BACKBONE = 'densenet121'\n",
+            "CUSTOM_VISUAL_BACKBONE = 'swin_tiny'\n",
             "\n",
             "# Automatically search for the dataset input path\n",
             "import os\n",
@@ -174,11 +174,13 @@ def main():
             "    VISION_T5_EPOCHS = 15\n",
             "else:\n",
             "    TEXT_MODEL_NAME = 't5-small'\n",
-            "    VISUAL_BACKBONE = 'densenet121'\n",
+            "    VISUAL_BACKBONE = 'swin_tiny'\n",
             "    VISION_T5_BATCH_SIZE = 8\n",
             "    VISION_T5_EPOCHS = 1\n",
             "\n",
-            "FREEZE_VISUAL_ENCODER = False # Set to True to freeze visual encoder, False to fine-tune it\n",
+            "FREEZE_VISUAL_ENCODER = False # Set to True to freeze visual encoder, False to fine-tune\n",
+            "USE_DIAGNOSIS_PROMPTS = True  # Prepend CheXpert-14 diagnosis prefix to encoder prompt (PromptMRG-style)\n",
+            "CLS_LAMBDA = 0.5             # Classification BCE loss weight\n",
             "MAX_NEW_TOKENS = 128 # Maximum generated report length\n",
             "RETRIEVAL_TOP_K = 10 # Retrieval candidates count\n",
             "print(f'Configuration initialized. Run size: {RUN_SIZE}, Dataset: {DATASET}, Engine: {VLM_ENGINE}')\n",
@@ -287,7 +289,7 @@ def main():
             "else:\n",
             "    device_arg = 'cuda' if torch.cuda.is_available() else 'cpu'\n",
             "    print(f'Training Custom Vision-T5 on {device_arg}...')\n",
-            "    !python scripts/train_vision_t5_generator.py --epochs {VISION_T5_EPOCHS} --batch-size {VISION_T5_BATCH_SIZE} --text-model-name {TEXT_MODEL_NAME} --visual-backbone {VISUAL_BACKBONE} --freeze-visual-encoder {FREEZE_VISUAL_ENCODER} --device {device_arg}\n",
+            "    !python scripts/train_vision_t5_generator.py --epochs {VISION_T5_EPOCHS} --batch-size {VISION_T5_BATCH_SIZE} --text-model-name {TEXT_MODEL_NAME} --visual-backbone {VISUAL_BACKBONE} --freeze-visual-encoder {FREEZE_VISUAL_ENCODER} --use-diagnosis-prompts {USE_DIAGNOSIS_PROMPTS} --cls-lambda {CLS_LAMBDA} --device {device_arg}\n",
             "    \n",
             "    print(f'Generating predictions with Custom Vision-T5 on {device_arg}...')\n",
             "    !python scripts/generate_vision_t5_reports.py --batch-size {VISION_T5_BATCH_SIZE} --max-new-tokens {MAX_NEW_TOKENS} --device {device_arg}"
