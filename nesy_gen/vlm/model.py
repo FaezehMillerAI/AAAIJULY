@@ -189,34 +189,42 @@ class VisionT5(nn.Module):
             )
 
         # ── Visual tokens → T5 embedding space ───────────────────────────
-        visual_tokens = self.proj(spatial_feats)     # (B, N, d_model)
-
-        # ── Combine with text encoder output ─────────────────────────────
+        visual_embeds = self.proj(spatial_feats)     # (B, N, d_model)
         vis_mask = torch.ones(
-            (batch_size, visual_tokens.size(1)), dtype=torch.long, device=device
+            (batch_size, visual_embeds.size(1)), dtype=torch.long, device=device
         )
+
         if encoder_input_ids is not None:
-            text_out = self.t5.encoder(
-                input_ids=encoder_input_ids,
-                attention_mask=encoder_attention_mask,
-            )
-            combined = torch.cat([visual_tokens, text_out.last_hidden_state], dim=1)
+            # Embed the text tokens
+            text_embeds = self.t5.encoder.embed_tokens(encoder_input_ids) # (B, seq_len, d_model)
+            
+            # Combine in the input embedding space
+            combined_embeds = torch.cat([visual_embeds, text_embeds], dim=1) # (B, N + seq_len, d_model)
             combined_mask = (
                 torch.cat([vis_mask, encoder_attention_mask], dim=1)
                 if encoder_attention_mask is not None
                 else vis_mask
             )
+            
+            # Pass combined embeds through the encoder so they fully interact
+            encoder_outputs = self.t5.encoder(
+                inputs_embeds=combined_embeds,
+                attention_mask=combined_mask,
+            )
         else:
-            combined      = visual_tokens
+            encoder_outputs = self.t5.encoder(
+                inputs_embeds=visual_embeds,
+                attention_mask=vis_mask,
+            )
             combined_mask = vis_mask
 
-        enc_out = BaseModelOutput(last_hidden_state=combined)
         t5_out  = self.t5(
             decoder_input_ids=decoder_input_ids,
-            encoder_outputs=enc_out,
+            encoder_outputs=encoder_outputs,
             attention_mask=combined_mask,
             labels=labels,
         )
+
 
         # ── Combined loss: generation CE + λ × classification BCE ─────────
         gen_loss   = t5_out.loss
@@ -304,32 +312,36 @@ class VisionT5(nn.Module):
                 encoder_attention_mask = enc["attention_mask"]
 
             # ── Step 3: project visual tokens ────────────────────────────
-            visual_tokens = self.proj(spatial_feats)        # (B, N, d_model)
+            visual_embeds = self.proj(spatial_feats)        # (B, N, d_model)
             vis_mask = torch.ones(
-                (batch_size, visual_tokens.size(1)), dtype=torch.long, device=device
+                (batch_size, visual_embeds.size(1)), dtype=torch.long, device=device
             )
 
             if encoder_input_ids is not None:
-                text_out = self.t5.encoder(
-                    input_ids=encoder_input_ids,
-                    attention_mask=encoder_attention_mask,
-                )
-                combined      = torch.cat([visual_tokens, text_out.last_hidden_state], dim=1)
+                text_embeds = self.t5.encoder.embed_tokens(encoder_input_ids)
+                combined_embeds = torch.cat([visual_embeds, text_embeds], dim=1)
                 combined_mask = (
                     torch.cat([vis_mask, encoder_attention_mask], dim=1)
                     if encoder_attention_mask is not None
                     else vis_mask
                 )
+                encoder_outputs = self.t5.encoder(
+                    inputs_embeds=combined_embeds,
+                    attention_mask=combined_mask,
+                )
             else:
-                combined      = visual_tokens
+                encoder_outputs = self.t5.encoder(
+                    inputs_embeds=visual_embeds,
+                    attention_mask=vis_mask,
+                )
                 combined_mask = vis_mask
 
-            enc_out = BaseModelOutput(last_hidden_state=combined)
             return self.t5.generate(
-                encoder_outputs=enc_out,
+                encoder_outputs=encoder_outputs,
                 attention_mask=combined_mask,
                 **kwargs,
             )
+
 
 
     # ── Checkpoint ────────────────────────────────────────────────────────
