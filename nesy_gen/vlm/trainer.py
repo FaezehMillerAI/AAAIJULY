@@ -2,7 +2,6 @@ import torch
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from torch.cuda.amp import GradScaler, autocast
 import time
 from pathlib import Path
 from typing import Callable, Optional
@@ -55,7 +54,8 @@ def train_model(
 
     optimizer = AdamW(model.parameters(), lr=lr, weight_decay=0.01)
     scheduler = CosineAnnealingLR(optimizer, T_max=epochs * max(1, len(train_loader)))
-    scaler    = GradScaler(enabled=(autocast_dtype == torch.float16))
+    # GradScaler: only used for float16, not bfloat16
+    scaler = torch.amp.GradScaler("cuda", enabled=(autocast_dtype == torch.float16))
 
     best_val_loss = float("inf")
 
@@ -79,7 +79,7 @@ def train_model(
 
             optimizer.zero_grad()
 
-            with autocast(**autocast_kwargs):
+            with torch.amp.autocast("cuda", **autocast_kwargs):
                 outputs = model(
                     images=images,
                     encoder_input_ids=encoder_input_ids,
@@ -131,7 +131,7 @@ def train_model(
                 if chexpert_labels is not None:
                     chexpert_labels = chexpert_labels.to(device)
 
-                with autocast(**autocast_kwargs):
+                with torch.amp.autocast("cuda", **autocast_kwargs):
                     outputs = model(
                         images=images,
                         encoder_input_ids=encoder_input_ids,
