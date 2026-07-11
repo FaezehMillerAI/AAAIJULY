@@ -1,9 +1,16 @@
 import torch
 import torch.nn as nn
 import torchvision
+from typing import List
 from transformers import T5ForConditionalGeneration
 from transformers.modeling_outputs import BaseModelOutput
-from .chexpert_labels import CHEXPERT_LABELS, labels_to_prompt_prefix
+from .chexpert_labels import (
+    CHEXPERT_LABELS,
+    labels_to_prompt_prefix,
+    extract_chexpert_labels,
+    get_edit_actions,
+)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # VisionT5 with Swin-T backbone + Diagnosis Classification Branch
@@ -229,13 +236,17 @@ class VisionT5(nn.Module):
         encoder_input_ids=None,
         encoder_attention_mask=None,
         tokenizer=None,
+        template_reports: List[str] = None,  # list of template strings
         **kwargs,
     ):
         """
         At inference:
           1. Run visual encoder → classifier → predicted CheXpert labels
-          2. If use_diagnosis_prompts, prepend diagnosis prefix to prompt
-          3. Run T5 generate
+          2. If use_diagnosis_prompts and template_reports provided:
+             Compute target edits and build prompt:
+             "template: [text] edit: [actions]. generate report: [indication]"
+          3. Else, prepend simple diagnosis prefix to prompt.
+          4. Run T5 generate.
         """
         with torch.no_grad():
             spatial_feats, pooled_feats = self._extract_visual_features(images, frozen_ctx=True)
@@ -248,23 +259,43 @@ class VisionT5(nn.Module):
             cls_probs   = torch.sigmoid(cls_logits)          # (B, 14)
             pred_labels = (cls_probs > 0.5).cpu().tolist()   # list[list[bool]]
 
-            # ── Step 2: inject diagnosis prefix into encoder prompt ───────
+            # ── Step 2: inject NeSy-CARE edit prompt or diagnosis prefix ──
             if self.use_diagnosis_prompts and tokenizer is not None and encoder_input_ids is not None:
-                # Decode existing prompt tokens
+                # Decode existing prompt tokens (e.g. "generate report: chest pain")
                 raw_prompts = tokenizer.batch_decode(
                     encoder_input_ids, skip_special_tokens=True
                 )
-                # Build augmented prompts: "diagnosis: X, Y. generate report: <indication>"
+                
                 aug_prompts = []
-                for prompt_text, lbl_vec in zip(raw_prompts, pred_labels):
-                    prefix = labels_to_prompt_prefix([float(v) for v in lbl_vec])
-                    aug = f"{prefix} {prompt_text}".strip() if prefix else prompt_text
+                for idx, (prompt_text, lbl_vec) in enumerate(zip(raw_prompts, pred_labels)):
+                    template_report = (
+                        template_reports[idx].strip()
+                        if (template_reports is not None and idx < len(template_reports))
+                        else ""
+                    )
+                    
+                    if template_report:
+                        tpl_floats = extract_chexpert_labels(template_report)
+                        edit_actions = get_edit_actions(
+                            tpl_floats,
+                            [float(v) for v in lbl_vec],
+                            cls_probs[idx].cpu().tolist()
+                        )
+                        aug = (
+                            f"template: {template_report} "
+                            f"edit: {edit_actions}. "
+                            f"{prompt_text}"
+                        )
+                    else:
+                        prefix = labels_to_prompt_prefix([float(v) for v in lbl_vec])
+                        aug = f"{prefix} {prompt_text}".strip() if prefix else prompt_text
+                        
                     aug_prompts.append(aug)
 
                 # Re-encode augmented prompts
                 enc = tokenizer(
                     aug_prompts,
-                    max_length=encoder_input_ids.size(1) + 32,
+                    max_length=self.t5.config.n_positions if hasattr(self.t5.config, "n_positions") else 512,
                     padding="max_length",
                     truncation=True,
                     return_tensors="pt",
@@ -299,6 +330,7 @@ class VisionT5(nn.Module):
                 attention_mask=combined_mask,
                 **kwargs,
             )
+
 
     # ── Checkpoint ────────────────────────────────────────────────────────
     def save_checkpoint(self, path: str):

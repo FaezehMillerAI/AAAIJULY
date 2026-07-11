@@ -67,15 +67,45 @@ def main():
         cls_lambda=args.cls_lambda,
     )
 
+    # NeSy-CARE visual template retrieval setup
+    train_templates = {}
+    val_templates = {}
+    if args.use_diagnosis_prompts:
+        print("Extracting train image features for visual template retrieval (NeSy-CARE)...")
+        from nesy_gen.retrieval.visual import VisualRetrieval
+        # Determine device for retrieval
+        retrieval_device = "cuda" if torch.cuda.is_available() and args.device == "cuda" else "cpu"
+        retriever = VisualRetrieval(train_exs, device=retrieval_device)
+
+        print("Computing training templates (leave-one-out)...")
+        for ex in train_exs:
+            candidates = retriever.retrieve(ex["image_path"], top_k=2)
+            # Avoid self-retrieval
+            if candidates and candidates[0]["study_id"] == ex["study_id"] and len(candidates) > 1:
+                template = candidates[1]["report"]
+            elif candidates:
+                template = candidates[0]["report"]
+            else:
+                template = ""
+            train_templates[ex["study_id"]] = template
+
+        print("Computing validation templates...")
+        for ex in val_exs:
+            candidates = retriever.retrieve(ex["image_path"], top_k=1)
+            val_templates[ex["study_id"]] = candidates[0]["report"] if candidates else ""
+
     # Initialize datasets
     train_dataset = RadiologyDataset(
         train_exs, tokenizer,
+        templates=train_templates,
         use_diagnosis_prompts=args.use_diagnosis_prompts,
     )
     val_dataset = RadiologyDataset(
         val_exs, tokenizer,
+        templates=val_templates,
         use_diagnosis_prompts=args.use_diagnosis_prompts,
     )
+
     
     # Start training
     print("Starting training...")

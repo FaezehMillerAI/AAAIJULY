@@ -33,11 +33,12 @@ def main():
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
-    # Load manifest
-    print(f"Loading test manifest from {manifest_path}...")
+    # Load manifest splits
+    print(f"Loading manifest from {manifest_path}...")
     examples = load_manifest(manifest_path)
+    train_exs = filter_manifest(examples, "train")
     test_exs = filter_manifest(examples, "test")
-    print(f"Test examples found: {len(test_exs)}")
+    print(f"Train examples (template DB): {len(train_exs)}, Test examples: {len(test_exs)}")
     
     if not test_exs:
         print("No test examples found. Exiting.")
@@ -74,9 +75,27 @@ def main():
     model.load_checkpoint(ckpt_dir)
     model.to(device)
     model.eval()
+
+    # Pre-compute test templates
+    test_templates = {}
+    if ckpt_diag_prompts and train_exs:
+        print("Extracting train image features for visual template retrieval (NeSy-CARE)...")
+        from nesy_gen.retrieval.visual import VisualRetrieval
+        retrieval_device = "cuda" if torch.cuda.is_available() and args.device == "cuda" else "cpu"
+        retriever = VisualRetrieval(train_exs, device=retrieval_device)
+        
+        print("Computing test templates...")
+        for ex in test_exs:
+            candidates = retriever.retrieve(ex["image_path"], top_k=1)
+            test_templates[ex["study_id"]] = candidates[0]["report"] if candidates else ""
     
-    test_dataset = RadiologyDataset(test_exs, tokenizer)
+    test_dataset = RadiologyDataset(
+        test_exs, tokenizer,
+        templates=test_templates,
+        use_diagnosis_prompts=ckpt_diag_prompts,
+    )
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
+
     
     # Load manifest indications for styling
     indications = {ex["study_id"]: ex.get("indication", "radiology evaluation") for ex in test_exs}
@@ -99,6 +118,7 @@ def main():
                 encoder_input_ids=enc_ids,
                 encoder_attention_mask=enc_mask,
                 tokenizer=tokenizer,               # enables diagnosis-prompt injection
+                template_reports=batch.get("template_report"),  # NeSy-CARE templates
                 max_new_tokens=args.max_new_tokens,
                 num_beams=4,
                 length_penalty=1.5,
@@ -106,6 +126,7 @@ def main():
                 no_repeat_ngram_size=3,
                 early_stopping=True,
             )
+
             
             # Decode
             predictions = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
