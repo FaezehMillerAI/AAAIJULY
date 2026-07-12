@@ -60,9 +60,10 @@ class VisionT5(nn.Module):
                 self.is_swin = True
             elif visual_backbone == "vit_base_patch16_224":
                 # Returns sequence of patches (B, 197, 768) including CLS token
-                self.visual_features = timm.create_model("vit_base_patch16_224", pretrained=True, num_classes=0)
+                self.visual_features = timm.create_model("vit_base_patch16_224", pretrained=True, num_classes=0, global_pool="")
                 self.num_visual_features = 768
                 self.is_vit = True
+
         else:
             raise ValueError(f"Unsupported visual backbone: {visual_backbone}")
             
