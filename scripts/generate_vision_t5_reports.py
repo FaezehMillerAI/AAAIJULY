@@ -4,6 +4,13 @@ from pathlib import Path
 import sys
 import torch
 from transformers import AutoTokenizer
+import ssl
+
+try:
+    ssl._create_default_https_context = ssl._create_unverified_context
+except AttributeError:
+    pass
+
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -30,7 +37,11 @@ def main():
     out_file = Path(args.output_file)
     out_file.parent.mkdir(parents=True, exist_ok=True)
     
-    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+    if args.device == "mps" and torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+
     print(f"Using device: {device}")
     
     # Load manifest splits
@@ -93,8 +104,12 @@ def main():
     if ckpt_diag_prompts and train_exs:
         print("Extracting train image features for visual template retrieval (NeSy-CARE)...")
         from nesy_gen.retrieval.visual import VisualRetrieval
-        retrieval_device = "cuda" if torch.cuda.is_available() and args.device == "cuda" else "cpu"
+        if args.device == "mps" and torch.backends.mps.is_available():
+            retrieval_device = "mps"
+        else:
+            retrieval_device = "cuda" if torch.cuda.is_available() and args.device == "cuda" else "cpu"
         retriever = VisualRetrieval(train_exs, device=retrieval_device)
+
         
         print("Computing test templates...")
         for ex in test_exs:

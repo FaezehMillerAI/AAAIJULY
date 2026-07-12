@@ -30,8 +30,12 @@ def train_model(
     if log_fn is None:
         log_fn = lambda x: None
 
-    device = torch.device(device if torch.cuda.is_available() else "cpu")
+    if device == "mps" and torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device(device if torch.cuda.is_available() else "cpu")
     log_fn(f"Using device: {device}")
+
     model.to(device)
 
     # ── Mixed precision setup (bfloat16 for T5 stability) ─────────────────

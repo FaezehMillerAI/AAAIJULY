@@ -7,7 +7,11 @@ import numpy as np
 
 class VisualRetrieval:
     def __init__(self, train_examples, device="cuda"):
-        self.device = torch.device(device if torch.cuda.is_available() else "cpu")
+        if device == "mps" and torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+        else:
+            self.device = torch.device(device if torch.cuda.is_available() else "cpu")
+
         self.train_examples = train_examples
         
         # Initialize pretrained ResNet18 model for fast feature extraction

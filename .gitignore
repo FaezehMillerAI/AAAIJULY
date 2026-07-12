@@ -21,3 +21,8 @@ output/
 .venv/
 env/
 venv/
+
+# Heavy datasets and temporary scratch directories
+datasets/
+scratch/
+

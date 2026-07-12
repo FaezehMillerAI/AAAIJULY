@@ -3,6 +3,13 @@ from pathlib import Path
 import sys
 import torch
 from transformers import AutoTokenizer
+import ssl
+
+try:
+    ssl._create_default_https_context = ssl._create_unverified_context
+except AttributeError:
+    pass
+
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -74,8 +81,12 @@ def main():
         print("Extracting train image features for visual template retrieval (NeSy-CARE)...")
         from nesy_gen.retrieval.visual import VisualRetrieval
         # Determine device for retrieval
-        retrieval_device = "cuda" if torch.cuda.is_available() and args.device == "cuda" else "cpu"
+        if args.device == "mps" and torch.backends.mps.is_available():
+            retrieval_device = "mps"
+        else:
+            retrieval_device = "cuda" if torch.cuda.is_available() and args.device == "cuda" else "cpu"
         retriever = VisualRetrieval(train_exs, device=retrieval_device)
+
 
         print("Computing training templates (leave-one-out)...")
         for ex in train_exs:
