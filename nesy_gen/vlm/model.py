@@ -193,12 +193,14 @@ class VisionT5(nn.Module):
         device     = images.device
 
         # ── Classification branch ─────────────────────────────────────────
-        cls_logits = self.classifier(pooled_feats)   # (B, 14)
+        cls_logits = torch.zeros((batch_size, self.num_chexpert_labels), device=device)
         cls_loss   = torch.tensor(0.0, device=device)
-        if chexpert_labels is not None:
-            cls_loss = self._cls_criterion(
-                cls_logits, chexpert_labels.float().to(device)
-            )
+        if self.use_diagnosis_prompts:
+            cls_logits = self.classifier(pooled_feats)   # (B, 14)
+            if chexpert_labels is not None:
+                cls_loss = self._cls_criterion(
+                    cls_logits, chexpert_labels.float().to(device)
+                )
 
         # ── Visual tokens → T5 embedding space ───────────────────────────
         visual_embeds = self.proj(spatial_feats)     # (B, N, d_model)
@@ -248,7 +250,8 @@ class VisionT5(nn.Module):
             gen_loss = loss_fct(logits.view(-1, logits.size(-1)), labels.to(device).view(-1))
 
         # ── Combined loss: generation CE + λ × classification BCE ─────────
-        total_loss = gen_loss + self.cls_lambda * cls_loss
+        total_loss = gen_loss + self.cls_lambda * cls_loss if self.use_diagnosis_prompts else gen_loss
+
 
         # Monkey-patch loss so trainer code stays unchanged
         t5_out.loss      = total_loss
@@ -283,9 +286,14 @@ class VisionT5(nn.Module):
             device     = images.device
 
             # ── Step 1: predict diagnosis labels ─────────────────────────
-            cls_logits  = self.classifier(pooled_feats)      # (B, 14)
-            cls_probs   = torch.sigmoid(cls_logits)          # (B, 14)
-            pred_labels = (cls_probs > 0.5).cpu().tolist()   # list[list[bool]]
+            cls_logits = None
+            cls_probs = None
+            pred_labels = None
+            if self.use_diagnosis_prompts:
+                cls_logits  = self.classifier(pooled_feats)      # (B, 14)
+                cls_probs   = torch.sigmoid(cls_logits)          # (B, 14)
+                pred_labels = (cls_probs > 0.5).cpu().tolist()   # list[list[bool]]
+
 
             # ── Step 2: inject NeSy-CARE edit prompt or diagnosis prefix ──
             if self.use_diagnosis_prompts and tokenizer is not None and encoder_input_ids is not None:

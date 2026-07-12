@@ -44,11 +44,7 @@ def main():
         print("No test examples found. Exiting.")
         return
         
-    # Load tokenizer and model
-    print("Loading tokenizer and model from checkpoint...")
-    tokenizer = AutoTokenizer.from_pretrained(ckpt_dir / "tokenizer", use_fast=True)
-    
-    # Load saved config to restore exact model arch that was trained
+    # Load saved config first to retrieve the exact text model name
     import json
     config_path = ckpt_dir / "config.json"
     ckpt_text_model        = "razent/SciFive-base-PMC"
@@ -64,6 +60,22 @@ def main():
         ckpt_freeze          = ckpt_cfg.get("freeze_visual_encoder", ckpt_freeze)
         ckpt_diag_prompts    = ckpt_cfg.get("use_diagnosis_prompts", ckpt_diag_prompts)
         ckpt_cls_lambda      = ckpt_cfg.get("cls_lambda",            ckpt_cls_lambda)
+
+    # Load tokenizer and model
+    print("Loading tokenizer and model from checkpoint...")
+    
+    local_tokenizer_path = ckpt_dir / "tokenizer"
+    try:
+        # Check if local directory exists, and pass as a string (safer for HF from_pretrained)
+        if local_tokenizer_path.exists() and local_tokenizer_path.is_dir():
+            tokenizer = AutoTokenizer.from_pretrained(str(local_tokenizer_path), use_fast=True)
+        else:
+            raise FileNotFoundError(f"Local tokenizer folder {local_tokenizer_path} not found.")
+    except Exception as e:
+        print(f"Warning: Failed to load local tokenizer ({e}). Falling back to HF Hub: {ckpt_text_model}")
+        tokenizer = AutoTokenizer.from_pretrained(ckpt_text_model, use_fast=True)
+
+
 
     model = VisionT5(
         text_model_name=ckpt_text_model,
