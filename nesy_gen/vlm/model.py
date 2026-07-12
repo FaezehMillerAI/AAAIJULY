@@ -81,12 +81,21 @@ class VisionT5(nn.Module):
                         param.requires_grad = False
         
     def _extract_visual_features(self, images):
+        is_timm = self.is_swin or self.is_vit
+        
         if self.freeze_visual_encoder:
             self.visual_features.eval()
             with torch.no_grad():
-                raw = self.visual_features(images)
+                if is_timm:
+                    raw = self.visual_features.forward_features(images)
+                else:
+                    raw = self.visual_features(images)
         else:
-            raw = self.visual_features(images)
+            if is_timm:
+                raw = self.visual_features.forward_features(images)
+            else:
+                raw = self.visual_features(images)
+
             
         if self.is_swin:
             if raw.dim() == 4:  # (B, H, W, C)
