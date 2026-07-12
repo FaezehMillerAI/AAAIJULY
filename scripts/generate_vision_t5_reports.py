@@ -6,6 +6,12 @@ import torch
 from transformers import AutoTokenizer
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import ssl
+
+try:
+    ssl._create_default_https_context = ssl._create_unverified_context
+except AttributeError:
+    pass
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -18,9 +24,14 @@ def parse_args():
     parser.add_argument("--manifest-path", type=str, default="output/common_manifest.jsonl")
     parser.add_argument("--checkpoint-dir", type=str, default="output/vision_t5_checkpoint")
     parser.add_argument("--output-file", type=str, default="output/vision_t5_raw.csv")
-    parser.add_argument("--max-new-tokens", type=int, default=96)
+    parser.add_argument("--max-new-tokens", type=int, default=128)
     parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--device", type=str, default="cuda")
+    
+    # Auto-detect MPS on Mac if no device is specified
+    default_dev = "cuda"
+    if sys.platform == "darwin" and torch.backends.mps.is_available():
+        default_dev = "mps"
+    parser.add_argument("--device", type=str, default=default_dev)
     return parser.parse_args()
 
 def main():
@@ -30,7 +41,10 @@ def main():
     out_file = Path(args.output_file)
     out_file.parent.mkdir(parents=True, exist_ok=True)
     
-    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+    if args.device == "mps" and torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
     # Load manifest
@@ -45,15 +59,24 @@ def main():
         
     # Load tokenizer and model
     print("Loading tokenizer and model from checkpoint...")
-    tokenizer = AutoTokenizer.from_pretrained(ckpt_dir / "tokenizer", use_fast=True)
     
+    # Conver Path to string to avoid HuggingFace Path/str issue
+    tokenizer_path_str = str(ckpt_dir / "tokenizer")
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path_str, use_fast=True)
+    except Exception as e:
+        print(f"Failed to load local tokenizer from {tokenizer_path_str}: {e}")
+        fallback_model = "t5-small"
+        print(f"Attempting to download fallback tokenizer from HF Hub for '{fallback_model}'...")
+        tokenizer = AutoTokenizer.from_pretrained(fallback_model, use_fast=True)
+        
     model = VisionT5(freeze_visual_encoder=True)
     model.load_checkpoint(ckpt_dir)
     model.to(device)
     model.eval()
     
     test_dataset = RadiologyDataset(test_exs, tokenizer)
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=2)
     
     results = []
     
@@ -71,7 +94,7 @@ def main():
                 images=images,
                 encoder_input_ids=enc_ids,
                 encoder_attention_mask=enc_mask,
-                max_length=args.max_new_tokens,
+                max_new_tokens=args.max_new_tokens,
                 num_beams=2,
                 early_stopping=True
             )

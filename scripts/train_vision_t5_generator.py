@@ -3,6 +3,12 @@ from pathlib import Path
 import sys
 import torch
 from transformers import AutoTokenizer
+import ssl
+
+try:
+    ssl._create_default_https_context = ssl._create_unverified_context
+except AttributeError:
+    pass
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -32,7 +38,12 @@ def parse_args():
     parser.add_argument("--freeze-visual-encoder", type=str2bool, default=True)
     parser.add_argument("--fp16", type=str2bool, default=True)
     parser.add_argument("--output-dir", type=str, default="output/vision_t5_checkpoint")
-    parser.add_argument("--device", type=str, default="cuda")
+    
+    # Auto-detect MPS on Mac if no device is specified
+    default_dev = "cuda"
+    if sys.platform == "darwin" and torch.backends.mps.is_available():
+        default_dev = "mps"
+    parser.add_argument("--device", type=str, default=default_dev)
     return parser.parse_args()
 
 def main():

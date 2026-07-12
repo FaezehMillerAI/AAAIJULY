@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torchvision
-from transformers import T5ForConditionalGeneration, T5Config
+from transformers import T5ForConditionalGeneration
 from transformers.modeling_outputs import BaseModelOutput
 
 class VisionT5(nn.Module):
@@ -21,10 +21,17 @@ class VisionT5(nn.Module):
         self.proj = nn.Linear(self.num_visual_features, self.d_model)
 
     def _init_visual_encoder(self, visual_backbone: str):
+        self.is_swin = False
+        self.is_vit = False
+
         if visual_backbone == "densenet121":
             self.visual_encoder = torchvision.models.densenet121(weights=torchvision.models.DenseNet121_Weights.DEFAULT)
             self.visual_features = self.visual_encoder.features
             self.num_visual_features = 1024
+        elif visual_backbone == "resnet18":
+            self.visual_encoder = torchvision.models.resnet18(weights=torchvision.models.ResNet18_Weights.DEFAULT)
+            self.visual_features = nn.Sequential(*list(self.visual_encoder.children())[:-2])
+            self.num_visual_features = 512
         elif visual_backbone == "resnet50":
             self.visual_encoder = torchvision.models.resnet50(weights=torchvision.models.ResNet50_Weights.DEFAULT)
             self.visual_features = nn.Sequential(*list(self.visual_encoder.children())[:-2])
@@ -37,86 +44,142 @@ class VisionT5(nn.Module):
             self.visual_encoder = torchvision.models.efficientnet_b4(weights=torchvision.models.EfficientNet_B4_Weights.DEFAULT)
             self.visual_features = self.visual_encoder.features
             self.num_visual_features = 1792
+        elif visual_backbone in ["swin_tiny", "swin_base", "vit_base_patch16_224"]:
+            try:
+                import timm
+            except ImportError:
+                raise ImportError("timm is required for Swin/ViT backbones: pip install timm")
+            
+            if visual_backbone == "swin_tiny":
+                self.visual_features = timm.create_model("swin_tiny_patch4_window7_224", pretrained=True, num_classes=0, global_pool="")
+                self.num_visual_features = 768
+                self.is_swin = True
+            elif visual_backbone == "swin_base":
+                self.visual_features = timm.create_model("swin_base_patch4_window7_224", pretrained=True, num_classes=0, global_pool="")
+                self.num_visual_features = 1024
+                self.is_swin = True
+            elif visual_backbone == "vit_base_patch16_224":
+                # Returns sequence of patches (B, 197, 768) including CLS token
+                self.visual_features = timm.create_model("vit_base_patch16_224", pretrained=True, num_classes=0)
+                self.num_visual_features = 768
+                self.is_vit = True
         else:
             raise ValueError(f"Unsupported visual backbone: {visual_backbone}")
             
         if self.freeze_visual_encoder:
             for param in self.visual_features.parameters():
                 param.requires_grad = False
+        else:
+            # Partial fine-tuning for Swin Transformers
+            if hasattr(self.visual_features, "patch_embed"):
+                for param in self.visual_features.patch_embed.parameters():
+                    param.requires_grad = False
+            if hasattr(self.visual_features, "layers"):
+                for i in range(min(2, len(self.visual_features.layers))):
+                    for param in self.visual_features.layers[i].parameters():
+                        param.requires_grad = False
         
-    def forward(self, images, decoder_input_ids=None, labels=None, encoder_input_ids=None, encoder_attention_mask=None):
-        # Extract visual features
+    def _extract_visual_features(self, images):
         if self.freeze_visual_encoder:
+            self.visual_features.eval()
             with torch.no_grad():
-                # We put visual features in eval mode if frozen
-                self.visual_features.eval()
-                visual_feats = self.visual_features(images)  # Shape: (batch, 1024, 7, 7)
+                raw = self.visual_features(images)
         else:
-            visual_feats = self.visual_features(images)
+            raw = self.visual_features(images)
             
-        batch_size = visual_feats.size(0)
-        
-        # Reshape to sequence of visual tokens: (batch, num_tokens, num_visual_features)
-        # 7x7 = 49 visual tokens
-        visual_feats = visual_feats.flatten(2).transpose(1, 2)  # (batch, 49, 1024)
-        visual_tokens = self.proj(visual_feats)  # (batch, 49, d_model)
-        
-        # If encoder text input is provided, encode it and concatenate
-        if encoder_input_ids is not None:
-            text_encoder_outputs = self.t5.encoder(input_ids=encoder_input_ids, attention_mask=encoder_attention_mask)
-            text_feats = text_encoder_outputs.last_hidden_state  # (batch, seq_len, d_model)
-            
-            # Combine visual tokens and text tokens
-            combined_tokens = torch.cat([visual_tokens, text_feats], dim=1)  # (batch, 49 + seq_len, d_model)
-            
-            # Combine attention masks
-            vis_attention_mask = torch.ones((batch_size, visual_tokens.size(1)), dtype=torch.long, device=images.device)
-            if encoder_attention_mask is not None:
-                combined_attention_mask = torch.cat([vis_attention_mask, encoder_attention_mask], dim=1)
+        if self.is_swin:
+            if raw.dim() == 4:  # (B, H, W, C)
+                B, H, W, C = raw.shape
+                spatial_feats = raw.reshape(B, H * W, C)
             else:
-                combined_attention_mask = vis_attention_mask
+                spatial_feats = raw
+        elif self.is_vit:
+            # ViT output: (B, 197, 768). We exclude the CLS token at index 0 for spatial features
+            spatial_feats = raw[:, 1:, :]
         else:
-            combined_tokens = visual_tokens
-            combined_attention_mask = torch.ones((batch_size, visual_tokens.size(1)), dtype=torch.long, device=images.device)
+            # CNN output: (B, C, H, W) -> flatten to (B, H*W, C)
+            spatial_feats = raw.flatten(2).transpose(1, 2)
             
-        # Create BaseModelOutput for encoder_outputs
-        encoder_outputs = BaseModelOutput(last_hidden_state=combined_tokens)
+        return spatial_feats
+
+    def forward(self, images, decoder_input_ids=None, labels=None, encoder_input_ids=None, encoder_attention_mask=None):
+        spatial_feats = self._extract_visual_features(images)
+        batch_size = spatial_feats.size(0)
+        device = images.device
         
-        outputs = self.t5(
+        # Project visual features to T5 embedding space
+        visual_embeds = self.proj(spatial_feats)  # (B, N, d_model)
+        vis_mask = torch.ones((batch_size, visual_embeds.size(1)), dtype=torch.long, device=device)
+        
+        if encoder_input_ids is not None:
+            # Embed text tokens and combine in input embedding space
+            text_embeds = self.t5.encoder.embed_tokens(encoder_input_ids)
+            combined_embeds = torch.cat([visual_embeds, text_embeds], dim=1)
+            combined_mask = (
+                torch.cat([vis_mask, encoder_attention_mask], dim=1)
+                if encoder_attention_mask is not None
+                else vis_mask
+            )
+            encoder_outputs = self.t5.encoder(
+                inputs_embeds=combined_embeds,
+                attention_mask=combined_mask
+            )
+        else:
+            encoder_outputs = self.t5.encoder(
+                inputs_embeds=visual_embeds,
+                attention_mask=vis_mask
+            )
+            combined_mask = vis_mask
+            
+        # Shift right manually to calculate manual label-smoothed cross-entropy loss
+        if decoder_input_ids is None and labels is not None:
+            decoder_input_ids = self.t5._shift_right(labels)
+            
+        t5_out = self.t5(
             decoder_input_ids=decoder_input_ids,
             encoder_outputs=encoder_outputs,
-            attention_mask=combined_attention_mask,
-            labels=labels
+            attention_mask=combined_mask
         )
-        return outputs
+        
+        logits = t5_out.logits
+        if labels is not None:
+            loss_fct = nn.CrossEntropyLoss(label_smoothing=0.1, ignore_index=-100)
+            gen_loss = loss_fct(logits.view(-1, logits.size(-1)), labels.to(device).view(-1))
+            t5_out.loss = gen_loss
+            
+        return t5_out
 
     def generate(self, images, encoder_input_ids=None, encoder_attention_mask=None, **kwargs):
-        # Extract visual features
         with torch.no_grad():
-            self.visual_features.eval()
-            visual_feats = self.visual_features(images)
-            visual_feats = visual_feats.flatten(2).transpose(1, 2)
-            visual_tokens = self.proj(visual_feats)
+            spatial_feats = self._extract_visual_features(images)
+            batch_size = spatial_feats.size(0)
+            device = images.device
             
-            batch_size = visual_feats.size(0)
+            visual_embeds = self.proj(spatial_feats)
+            vis_mask = torch.ones((batch_size, visual_embeds.size(1)), dtype=torch.long, device=device)
+            
             if encoder_input_ids is not None:
-                text_encoder_outputs = self.t5.encoder(input_ids=encoder_input_ids, attention_mask=encoder_attention_mask)
-                text_feats = text_encoder_outputs.last_hidden_state
-                combined_tokens = torch.cat([visual_tokens, text_feats], dim=1)
-                vis_attention_mask = torch.ones((batch_size, visual_tokens.size(1)), dtype=torch.long, device=images.device)
-                if encoder_attention_mask is not None:
-                    combined_attention_mask = torch.cat([vis_attention_mask, encoder_attention_mask], dim=1)
-                else:
-                    combined_attention_mask = vis_attention_mask
+                text_embeds = self.t5.encoder.embed_tokens(encoder_input_ids)
+                combined_embeds = torch.cat([visual_embeds, text_embeds], dim=1)
+                combined_mask = (
+                    torch.cat([vis_mask, encoder_attention_mask], dim=1)
+                    if encoder_attention_mask is not None
+                    else vis_mask
+                )
+                encoder_outputs = self.t5.encoder(
+                    inputs_embeds=combined_embeds,
+                    attention_mask=combined_mask
+                )
             else:
-                combined_tokens = visual_tokens
-                combined_attention_mask = torch.ones((batch_size, visual_tokens.size(1)), dtype=torch.long, device=images.device)
+                encoder_outputs = self.t5.encoder(
+                    inputs_embeds=visual_embeds,
+                    attention_mask=vis_mask
+                )
+                combined_mask = vis_mask
                 
-            encoder_outputs = BaseModelOutput(last_hidden_state=combined_tokens)
-            
             return self.t5.generate(
                 encoder_outputs=encoder_outputs,
-                attention_mask=combined_attention_mask,
+                attention_mask=combined_mask,
                 **kwargs
             )
             
