@@ -27,8 +27,14 @@ def parse_args():
     parser.add_argument("--output-file", type=str, default="output/vision_t5_raw.csv")
     parser.add_argument("--max-new-tokens", type=int, default=128)
     parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--device", type=str, default="cuda")
+    
+    # Auto-select mps on Mac if no device is specified
+    default_dev = "cuda"
+    if sys.platform == "darwin" and torch.backends.mps.is_available():
+        default_dev = "mps"
+    parser.add_argument("--device", type=str, default=default_dev)
     return parser.parse_args()
+
 
 def main():
     args = parse_args()

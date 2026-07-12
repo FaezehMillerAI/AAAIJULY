@@ -45,8 +45,14 @@ def parse_args():
                         help="Weight of classification BCE loss")
     parser.add_argument("--fp16", type=str2bool, default=True)
     parser.add_argument("--output-dir", type=str, default="output/vision_t5_checkpoint")
-    parser.add_argument("--device", type=str, default="cuda")
+    
+    # Auto-select mps on Mac if no device is specified
+    default_dev = "cuda"
+    if sys.platform == "darwin" and torch.backends.mps.is_available():
+        default_dev = "mps"
+    parser.add_argument("--device", type=str, default=default_dev)
     return parser.parse_args()
+
 
 def main():
     args = parse_args()
