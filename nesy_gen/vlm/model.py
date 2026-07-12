@@ -218,16 +218,24 @@ class VisionT5(nn.Module):
             )
             combined_mask = vis_mask
 
+        # If labels are provided but decoder_input_ids is None, shift right manually
+        # to avoid passing labels directly to self.t5 (which forces standard CE loss)
+        if decoder_input_ids is None and labels is not None:
+            decoder_input_ids = self.t5._shift_right(labels)
+
         t5_out  = self.t5(
             decoder_input_ids=decoder_input_ids,
             encoder_outputs=encoder_outputs,
             attention_mask=combined_mask,
-            labels=labels,
         )
 
+        logits = t5_out.logits
+        gen_loss = torch.tensor(0.0, device=device)
+        if labels is not None:
+            loss_fct = nn.CrossEntropyLoss(label_smoothing=0.1, ignore_index=-100)
+            gen_loss = loss_fct(logits.view(-1, logits.size(-1)), labels.to(device).view(-1))
 
         # ── Combined loss: generation CE + λ × classification BCE ─────────
-        gen_loss   = t5_out.loss
         total_loss = gen_loss + self.cls_lambda * cls_loss
 
         # Monkey-patch loss so trainer code stays unchanged
