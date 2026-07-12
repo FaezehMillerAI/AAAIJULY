@@ -33,8 +33,9 @@ def parse_args():
     parser.add_argument("--manifest-path", type=str, default="output/common_manifest.jsonl")
     parser.add_argument("--text-model-name", type=str, default="razent/SciFive-base-PMC")
     parser.add_argument("--visual-backbone", type=str, default="swin_tiny",
-                        choices=["swin_tiny", "swin_base", "densenet121", "resnet50",
-                                 "efficientnet_b0", "efficientnet_b4"])
+                        choices=["swin_tiny", "swin_base", "densenet121", "resnet18", "resnet50",
+                                 "efficientnet_b0", "efficientnet_b4", "vit_base_patch16_224"])
+
     parser.add_argument("--epochs", type=int, default=15)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--lr", type=float, default=5e-5)
