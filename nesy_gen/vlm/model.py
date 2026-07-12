@@ -194,6 +194,10 @@ class VisionT5(nn.Module):
         return t5_out
 
     def generate(self, images, encoder_input_ids=None, encoder_attention_mask=None, **kwargs):
+        # Pop custom parameters that are not accepted by HuggingFace T5 generate
+        kwargs.pop("tokenizer", None)
+        kwargs.pop("template_reports", None)
+        
         with torch.no_grad():
             spatial_feats, pooled_feats = self._extract_visual_features(images)
             batch_size = spatial_feats.size(0)
