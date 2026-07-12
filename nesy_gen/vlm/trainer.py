@@ -49,8 +49,23 @@ def train_model(
     if autocast_dtype != torch.float32:
         autocast_kwargs["dtype"] = autocast_dtype
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=False)
-    val_loader   = DataLoader(val_dataset,   batch_size=batch_size, shuffle=False)
+    # Optimize data loading on Kaggle (parallelize via workers and pin memory)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        drop_last=False,
+        num_workers=2,
+        pin_memory=True,
+    )
+    val_loader   = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=2,
+        pin_memory=True,
+    )
+
 
     optimizer = AdamW(model.parameters(), lr=lr, weight_decay=0.01)
     scheduler = CosineAnnealingLR(optimizer, T_max=epochs * max(1, len(train_loader)))

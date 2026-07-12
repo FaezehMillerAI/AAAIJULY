@@ -132,6 +132,18 @@ class VisionT5(nn.Module):
         if self.freeze_visual_encoder:
             for param in self.visual_features.parameters():
                 param.requires_grad = False
+        else:
+            # Partial fine-tuning: Freeze early feature layers (patch_embed, stage 0 & 1)
+            # to accelerate backpropagation, while keeping semantic stages (2 & 3) unfrozen.
+            if hasattr(self.visual_features, "patch_embed"):
+                for param in self.visual_features.patch_embed.parameters():
+                    param.requires_grad = False
+            if hasattr(self.visual_features, "layers"):
+                # Swin has 4 layers (stages). Freeze the first 2.
+                for i in range(min(2, len(self.visual_features.layers))):
+                    for param in self.visual_features.layers[i].parameters():
+                        param.requires_grad = False
+
 
     # ── Shared feature extraction ──────────────────────────────────────────
     def _extract_visual_features(self, images: torch.Tensor, frozen_ctx: bool = False):
