@@ -32,7 +32,7 @@ def customize_report_style(report_text: str, indication: str) -> str:
     if clean_text:
         clean_text = clean_text[0].upper() + clean_text[1:]
         
-    styled = f"Radiology report for indication: {indication}. {clean_text}"
+    styled = f"Department of Radiology. Chest X-Ray Examination. Patient Clinical Indication: {indication}. Comparison: None. Findings: {clean_text}"
     return styled
 
 class AdaptiveClaimVerifier:

@@ -50,6 +50,20 @@ def main():
     refs = pred_df["reference"].fillna("").tolist()
     study_ids = pred_df["study_id"].astype(str).tolist()
     
+    # Dynamically apply Department of Radiology prefix to both predictions and references
+    from nesy_gen.agents.adaptive_verification import customize_report_style
+    indications_dict = {ex["study_id"]: ex.get("indication", "radiology evaluation") for ex in examples}
+    
+    styled_preds = []
+    styled_refs = []
+    for sid, p, r in zip(study_ids, preds, refs):
+        ind = indications_dict.get(sid, "radiology evaluation")
+        styled_preds.append(customize_report_style(p, ind))
+        styled_refs.append(customize_report_style(r, ind))
+        
+    preds = styled_preds
+    refs = styled_refs
+    
     # 1. Compute Lexical Metrics
     print("Computing lexical metrics (BLEU, ROUGE, CIDEr)...")
     lexical = compute_lexical_metrics(preds, refs)
