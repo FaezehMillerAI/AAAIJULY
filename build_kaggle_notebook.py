@@ -407,10 +407,10 @@ def main():
             "pd.set_option('display.width', 200)\n",
             "print('\\n--- System Comparison Table ---')\n",
             "print(comparison_df.to_string(index=False))\n",
-            "# Highlight BLEU-1 >= 0.35\n",
-            "print('\\nBLEU-1 Target (>= 0.35):')\n",
+            "# Highlight BLEU-1 >= 0.60\n",
+            "print('\\nBLEU-1 Target (>= 0.60):')\n",
             "for _, r in comparison_df.iterrows():\n",
-            "    status = '✓ TARGET MET' if r['BLEU-1'] >= 0.35 else '✗ below target'\n",
+            "    status = '✓ TARGET MET' if r['BLEU-1'] >= 0.60 else '✗ below target'\n",
             "    print(f\"  {r['System']:<40} BLEU-1={r['BLEU-1']:.4f}  {status}\")\n",
             "comparison_df.to_csv('output/system_comparison_results.csv', index=False)\n",
             "print('\\nFull results saved to output/system_comparison_results.csv')"

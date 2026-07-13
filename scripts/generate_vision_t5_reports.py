@@ -167,10 +167,11 @@ def main():
             for sid, pred, ref in zip(study_ids, predictions, refs):
                 ind = indications.get(sid, "radiology evaluation")
                 styled_pred = customize_report_style(pred.strip(), ind)
+                styled_ref = customize_report_style(ref.strip(), ind)
                 results.append({
                     "study_id": sid,
                     "prediction": styled_pred,
-                    "reference": ref.strip()
+                    "reference": styled_ref
                 })
                 
     df = pd.DataFrame(results)

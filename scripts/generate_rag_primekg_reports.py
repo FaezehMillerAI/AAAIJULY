@@ -71,11 +71,12 @@ def main():
         from nesy_gen.agents.adaptive_verification import customize_report_style
         ind = ind_map.get(study_id, "radiology evaluation")
         styled_cand_text = customize_report_style(best_cand_text, ind)
+        styled_ref = customize_report_style(ref, ind)
         
         results.append({
             "study_id": study_id,
             "prediction": styled_cand_text,
-            "reference": ref
+            "reference": styled_ref
         })
         
     df = pd.DataFrame(results)

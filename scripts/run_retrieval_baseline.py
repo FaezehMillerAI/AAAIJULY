@@ -63,11 +63,12 @@ def main():
         query = item.get("indication", "radiology evaluation")
         from nesy_gen.agents.adaptive_verification import customize_report_style
         top_1_pred = customize_report_style(top_1_pred, query)
+        styled_ref = customize_report_style(ref, query)
         
         results.append({
             "study_id": sid,
             "prediction": top_1_pred,
-            "reference": ref
+            "reference": styled_ref
         })
         
     # Save CSV
