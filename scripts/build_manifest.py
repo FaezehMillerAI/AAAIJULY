@@ -184,65 +184,157 @@ def main():
                     
     elif args.dataset == "mimic":
         print(f"Searching MIMIC-CXR files in {data_dir}...")
+        import ast
         
-        # Collect image files
-        imgs = []
-        for dp, _, fns in os.walk(data_dir):
-            for fn in fns:
-                if fn.lower().endswith((".jpg", ".jpeg", ".png")):
-                    imgs.append(Path(os.path.join(dp, fn)))
-            # Stop if we have enough images for a massive dataset
-            if len(imgs) >= 5000:
+        # Locate files directory
+        files_dir = None
+        candidate_files_dirs = [
+            data_dir / "official_data_iccv_final" / "files",
+            data_dir / "official_data_iccv_final" / "official_data_iccv_final" / "files",
+            data_dir / "files"
+        ]
+        for c in candidate_files_dirs:
+            if c.exists() and c.is_dir():
+                files_dir = c
                 break
                 
-        print(f"Found {len(imgs)} MIMIC images. Resolving report connections...")
+        # Locate CSV files
+        train_csv = None
+        val_csv = None
+        candidate_csv_paths = [
+            (data_dir / "mimic_cxr_aug_train.csv", data_dir / "mimic_cxr_aug_validate.csv"),
+            (data_dir / "official_data_iccv_final" / "mimic_cxr_aug_train.csv", data_dir / "official_data_iccv_final" / "mimic_cxr_aug_validate.csv"),
+            (data_dir / "official_data_iccv_final" / "official_data_iccv_final" / "mimic_cxr_aug_train.csv", data_dir / "official_data_iccv_final" / "official_data_iccv_final" / "mimic_cxr_aug_validate.csv")
+        ]
+        for tc, vc in candidate_csv_paths:
+            if tc.exists() and vc.exists():
+                train_csv = tc
+                val_csv = vc
+                break
+                
+        if not train_csv or not files_dir:
+            raise FileNotFoundError(f"Could not locate MIMIC-CXR CSV files or image directory in {data_dir}")
+            
+        print(f"Loading MIMIC-CXR data from {train_csv.name} and {val_csv.name}...")
         
-        # Match each image to its text report
+        def safe_parse_list(val):
+            if not val or pd.isna(val):
+                return []
+            if isinstance(val, list):
+                return val
+            try:
+                return ast.literal_eval(val)
+            except Exception:
+                return []
+                
+        train_examples = []
+        val_test_examples = []
+        
+        # Load and parse training set
+        train_df = pd.read_csv(train_csv)
+        print(f"Parsing {len(train_df)} training patient rows...")
+        for _, row in train_df.iterrows():
+            images_list = safe_parse_list(row.get("image", "[]"))
+            reports_list = safe_parse_list(row.get("text", "[]"))
+            
+            studies_in_row = []
+            study_images = {}
+            for img_path in images_list:
+                parts = Path(img_path).parts
+                study_id = None
+                for part in parts:
+                    if part.startswith("s") and part[1:].isdigit():
+                        study_id = part
+                        break
+                if not study_id:
+                    study_id = parts[-2] if len(parts) >= 2 else "unknown"
+                if study_id not in study_images:
+                    study_images[study_id] = []
+                    studies_in_row.append(study_id)
+                study_images[study_id].append(img_path)
+                
+            num_matches = min(len(studies_in_row), len(reports_list))
+            for i in range(num_matches):
+                study_id = studies_in_row[i]
+                report_text = reports_list[i]
+                img_rel_path = study_images[study_id][0]
+                img_abs_path = files_dir.parent / img_rel_path
+                indication = extract_indication(report_text)
+                
+                train_examples.append({
+                    "study_id": study_id,
+                    "image_path": str(img_abs_path.absolute()),
+                    "report": report_text.strip(),
+                    "indication": indication if indication else "radiology evaluation",
+                    "split": "train",
+                    "metadata": {"source": "mimic_csv"}
+                })
+                
+        # Load and parse validation set
+        val_df = pd.read_csv(val_csv)
+        print(f"Parsing {len(val_df)} validation patient rows...")
+        for _, row in val_df.iterrows():
+            images_list = safe_parse_list(row.get("image", "[]"))
+            reports_list = safe_parse_list(row.get("text", "[]"))
+            
+            studies_in_row = []
+            study_images = {}
+            for img_path in images_list:
+                parts = Path(img_path).parts
+                study_id = None
+                for part in parts:
+                    if part.startswith("s") and part[1:].isdigit():
+                        study_id = part
+                        break
+                if not study_id:
+                    study_id = parts[-2] if len(parts) >= 2 else "unknown"
+                if study_id not in study_images:
+                    study_images[study_id] = []
+                    studies_in_row.append(study_id)
+                study_images[study_id].append(img_path)
+                
+            num_matches = min(len(studies_in_row), len(reports_list))
+            for i in range(num_matches):
+                study_id = studies_in_row[i]
+                report_text = reports_list[i]
+                img_rel_path = study_images[study_id][0]
+                img_abs_path = files_dir.parent / img_rel_path
+                indication = extract_indication(report_text)
+                
+                val_test_examples.append({
+                    "study_id": study_id,
+                    "image_path": str(img_abs_path.absolute()),
+                    "report": report_text.strip(),
+                    "indication": indication if indication else "radiology evaluation",
+                    "split": "val",  # placeholder
+                    "metadata": {"source": "mimic_csv"}
+                })
+                
+        # Shuffling and Capping
         random.seed(1234)
-        random.shuffle(imgs)
+        random.shuffle(train_examples)
+        random.shuffle(val_test_examples)
         
-        total = len(imgs)
-        train_end = int(total * 0.8)
-        val_end = int(total * 0.9)
+        train_examples = train_examples[:8000]
         
-        for idx, img_path in enumerate(imgs):
-            # Study ID is the filename stem or parent directory name
-            study_id = img_path.parent.name
+        # Split val_test_examples into 50% val and 50% test
+        num_val_test = len(val_test_examples)
+        val_size = min(1000, num_val_test // 2)
+        test_size = min(1000, num_val_test - val_size)
+        
+        val_examples = val_test_examples[:val_size]
+        test_examples = val_test_examples[val_size : val_size + test_size]
+        
+        for ex in val_examples:
+            ex["split"] = "val"
+        for ex in test_examples:
+            ex["split"] = "test"
             
-            # Check if there is a corresponding report file (usually in parent or sibling directories)
-            report_text = ""
-            # Search parent directories for .txt files
-            sibling_txts = list(img_path.parent.glob("*.txt"))
-            parent_txts = list(img_path.parent.parent.glob("*.txt"))
-            
-            possible_reports = sibling_txts + parent_txts
-            if possible_reports:
-                try:
-                    with open(possible_reports[0], "r", encoding="utf-8") as f:
-                        report_text = f.read()
-                except Exception:
-                    pass
-            
-            if not report_text:
-                report_text = "Chest X-ray. Findings: no pleural effusion or pneumothorax is seen. lungs are clear. Impression: normal study."
-                
-            indication = extract_indication(report_text)
-            
-            if idx < train_end:
-                split = "train"
-            elif idx < val_end:
-                split = "val"
-            else:
-                split = "test"
-                
-            examples.append({
-                "study_id": study_id,
-                "image_path": str(img_path.absolute()),
-                "report": report_text.strip(),
-                "indication": indication if indication else "radiology evaluation",
-                "split": split,
-                "metadata": {"source": "mimic_recursive"}
-            })
+        examples.extend(train_examples)
+        examples.extend(val_examples)
+        examples.extend(test_examples)
+        
+        print(f"MIMIC Parsing Complete: {len(train_examples)} train, {len(val_examples)} val, {len(test_examples)} test examples selected.")
 
     if not examples:
         print("No examples found. Creating mock fallback...")
