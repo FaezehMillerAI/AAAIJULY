@@ -31,13 +31,13 @@ def str2bool(v):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest-path", type=str, default="output/common_manifest.jsonl")
-    parser.add_argument("--text-model-name", type=str, default="razent/SciFive-base-PMC")
-    parser.add_argument("--visual-backbone", type=str, default="swin_tiny",
+    parser.add_argument("--text-model-name", type=str, default="t5-small")
+    parser.add_argument("--visual-backbone", type=str, default="efficientnet_b0",
                         choices=["swin_tiny", "swin_base", "densenet121", "resnet18", "resnet50",
                                  "efficientnet_b0", "efficientnet_b4", "vit_base_patch16_224"])
-
-    parser.add_argument("--epochs", type=int, default=15)
+    parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=4)
+
     parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--freeze-visual-encoder", type=str2bool, default=False)
     parser.add_argument("--use-diagnosis-prompts", type=str2bool, default=True,
