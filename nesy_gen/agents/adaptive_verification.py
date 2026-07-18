@@ -40,11 +40,13 @@ class AdaptiveClaimVerifier:
         self,
         kg_cache: PrimeKGRadiologyCache,
         fast_accept_threshold: float = 0.75,
-        min_supporting_reports: int = 1
+        min_supporting_reports: int = 1,
+        ltn_threshold: float = 0.7
     ):
         self.kg_cache = kg_cache
         self.fast_accept_threshold = fast_accept_threshold
         self.min_supporting_reports = min_supporting_reports
+        self.ltn_threshold = ltn_threshold
         
     def verify_and_revise(
         self,
@@ -132,7 +134,7 @@ class AdaptiveClaimVerifier:
                 ltn_metrics = evaluate_ltn_constraints(linked, self.kg_cache)
                 overall_ltn = ltn_metrics["overall_score"]
                 
-                if overall_ltn >= 0.5:
+                if overall_ltn >= self.ltn_threshold:
                     decision = "escalated_accept"
                     revised_text = claim
                 else:
@@ -151,7 +153,7 @@ class AdaptiveClaimVerifier:
                             ev_ltn = evaluate_ltn_constraints(ev_linked, self.kg_cache)["overall_score"]
                             
                             # Only consider candidate if it passes LTN verification itself
-                            if ev_ltn >= 0.5:
+                            if ev_ltn >= self.ltn_threshold:
                                 ev_anatomies = {e["node_id"] for e in ev_linked if e["node_type"] == "anatomy"}
                                 # Check if they share anatomies or context
                                 if not claim_anatomies or claim_anatomies.intersection(ev_anatomies):
@@ -203,14 +205,15 @@ def run_adaptive_verification_pipeline(
     output_dir: Path,
     prefix: str = "vision_t5",
     policy: str = "evidence_replace",
-    indications: dict = None
+    indications: dict = None,
+    ltn_threshold: float = 0.7
 ) -> pd.DataFrame:
     """
     Runs the full batch adaptive verification pipeline and saves results.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    verifier = AdaptiveClaimVerifier(kg_cache=kg_cache)
+    verifier = AdaptiveClaimVerifier(kg_cache=kg_cache, ltn_threshold=ltn_threshold)
     
     results = []
     all_traces = []

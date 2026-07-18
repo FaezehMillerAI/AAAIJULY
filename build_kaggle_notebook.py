@@ -417,6 +417,34 @@ def main():
         ]
     })
     
+    # 6.45 Ablation Study
+    cells.append({
+        "cell_type": "markdown",
+        "metadata": {},
+        "source": [
+            "## Section 4.5: Comprehensive Ablation Study\n",
+            "We run a comprehensive ablation study comparing various logic thresholds and revision policies."
+        ]
+    })
+    
+    cells.append({
+        "cell_type": "code",
+        "execution_count": None,
+        "metadata": {},
+        "outputs": [],
+        "source": [
+            "# Run ablation study\n",
+            "!python scripts/run_ablation_study.py\n",
+            "\n",
+            "# Display results\n",
+            "from IPython.display import Markdown, display\n",
+            "import os\n",
+            "if os.path.exists('output/ablation/ablation_results.md'):\n",
+            "    with open('output/ablation/ablation_results.md', 'r') as f:\n",
+            "        display(Markdown(f.read()))"
+        ]
+    })
+    
     # 6.5 Explainable Visualizations
     cells.append({
         "cell_type": "markdown",

@@ -18,6 +18,7 @@ def parse_args():
     parser.add_argument("--output-dir", type=str, default="output")
     parser.add_argument("--prefix", type=str, default="vision_t5")
     parser.add_argument("--policy", type=str, default="evidence_replace", choices=["audit_only", "evidence_replace"])
+    parser.add_argument("--ltn-threshold", type=float, default=0.7, help="LTN verification threshold")
     return parser.parse_args()
 
 def main():
@@ -55,7 +56,8 @@ def main():
         output_dir=out_dir,
         prefix=args.prefix + ("_audit_only" if args.policy == "audit_only" else ""),
         policy=args.policy,
-        indications=indications
+        indications=indications,
+        ltn_threshold=args.ltn_threshold
     )
     print("Adaptive verification process completed successfully.")
 
